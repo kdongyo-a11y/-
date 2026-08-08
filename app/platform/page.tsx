@@ -11,9 +11,9 @@ export default async function PlatformPage() {
 
   if (!ctx.ok) {
     if (ctx.status === 401) {
-      redirect("/?platform=login-required")
+      redirect("/platform/login")
     }
-    redirect("/?platform=forbidden")
+    redirect("/platform/login?error=forbidden")
   }
 
   return <PlatformDashboardView displayName={ctx.platformAdmin.display_name} />
