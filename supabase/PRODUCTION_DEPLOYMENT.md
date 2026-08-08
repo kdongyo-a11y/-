@@ -29,7 +29,7 @@
 
 ---
 
-## 최종 실행 순서 (15 steps)
+## 최종 실행 순서 (16 steps)
 
 | Step | 파일 | 중단 여부 | 기대 성공 상태 |
 |------|------|-----------|----------------|
@@ -49,6 +49,7 @@
 | **13** | `012_game_servers_guild_identity_phase55.sql` | 오류 시 중단 | **`game_servers` 31 rows**, `guilds.server_id` NOT NULL |
 | **14** | `013_admin_data_export_phase6.sql` | 오류 시 중단 | `guild_export_logs` |
 | **15** | `014_production_service_role_grants.sql` | 오류 시 중단 | 전 테이블 + RLS helper function `service_role` GRANT |
+| **16** | `015_platform_usage_analytics.sql` | 오류 시 중단 | `platform_admins`, `usage_events` (Phase 8 analytics) |
 
 ### Step 10 owner-sensitive 처리
 

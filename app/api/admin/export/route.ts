@@ -10,6 +10,7 @@ import {
   normalizeExportDatasets,
 } from "@/lib/admin-data/export-types"
 import { insertExportLog } from "@/lib/supabase/export-log-data"
+import { recordUsageEventFromActor } from "@/lib/platform/usage-events"
 
 type ExportBody = {
   period?: PeriodType
@@ -70,6 +71,13 @@ export async function POST(request: Request) {
       rowCounts,
       status: "success",
     })
+
+    void recordUsageEventFromActor(
+      "export_completed",
+      ctx.member,
+      { datasetCount: datasets.length },
+      admin,
+    )
 
     const filename = buildExportFilename(
       snapshot.identity.serverName,

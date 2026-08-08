@@ -5,6 +5,7 @@ import { requireAuthenticatedMember } from "@/lib/supabase/auth-helpers"
 import { requireAdmin } from "@/lib/supabase/operation-auth"
 import { actorGuildId } from "@/lib/supabase/guild-scope-helpers"
 import { completeOnboardingOnServer } from "@/lib/supabase/onboarding-data"
+import { recordUsageEventFromActor } from "@/lib/platform/usage-events"
 
 export async function POST() {
   try {
@@ -31,6 +32,8 @@ export async function POST() {
     if (!result.ok) {
       return NextResponse.json({ ok: false, message: result.message }, { status: 500 })
     }
+
+    void recordUsageEventFromActor("onboarding_completed", authResult.member, null, admin)
 
     return NextResponse.json({
       ok: true,

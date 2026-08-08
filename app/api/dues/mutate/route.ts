@@ -13,6 +13,7 @@ import {
   requireMemberInActorGuild,
 } from "@/lib/supabase/guild-scope-helpers"
 import type { DuesPaymentStatus } from "@/lib/dues-types"
+import { recordUsageEventFromActor } from "@/lib/platform/usage-events"
 
 type Body = {
   action?: string
@@ -104,6 +105,8 @@ export async function POST(request: Request) {
       if (membersError) {
         return NextResponse.json({ ok: false, message: "혈비 대상 등록에 실패했습니다." }, { status: 500 })
       }
+
+      void recordUsageEventFromActor("dues_created", authResult.member, null, admin)
 
       return NextResponse.json({ ok: true, message: "혈비가 부과되었습니다.", billId: due.id })
     }

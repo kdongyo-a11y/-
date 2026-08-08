@@ -7,6 +7,7 @@ import { uiSurveyToDb } from "@/lib/supabase/siege-mapper"
 import { isSundayDate } from "@/lib/siege-utils"
 import { getSiegeByIdForGuild } from "@/lib/supabase/siege-event-helpers"
 import { actorGuildId, requireMemberInActorGuild } from "@/lib/supabase/guild-scope-helpers"
+import { recordUsageEvent } from "@/lib/platform/usage-events"
 
 type SurveyResponseUi = "참여 예정" | "불참 예정"
 
@@ -341,7 +342,23 @@ export async function POST(request: Request) {
             })
           }
 
-          return NextResponse.json({ ok: true, message: "참여자가 확정되었습니다." })
+          void recordUsageEvent(
+            {
+              eventType: "siege_participation",
+              guildId,
+              memberId: body.memberId,
+              metadata: { source: body.action === "confirm_attendee" ? "confirmed" : "manual" },
+            },
+            admin,
+          )
+
+          return NextResponse.json({
+            ok: true,
+            message:
+              body.action === "confirm_attendee"
+                ? "참여자가 확정되었습니다."
+                : "참여자가 추가되었습니다.",
+          })
         }
 
         if (body.action === "add_participant") {
@@ -399,6 +416,16 @@ export async function POST(request: Request) {
             reason: memo,
             created_by: actorId,
           })
+
+          void recordUsageEvent(
+            {
+              eventType: "siege_participation",
+              guildId,
+              memberId: body.memberId,
+              metadata: { source: "manual" },
+            },
+            admin,
+          )
         } else {
           const { data: existing } = await admin
             .from("siege_participations")

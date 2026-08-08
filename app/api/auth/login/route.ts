@@ -7,6 +7,7 @@ import {
 } from "@/lib/supabase/auth-helpers"
 import { rowToMember } from "@/lib/supabase/member-mapper"
 import { normalizeGuildName } from "@/lib/guild-types"
+import { recordUsageEvent } from "@/lib/platform/usage-events"
 
 export async function POST(request: Request) {
   try {
@@ -63,6 +64,15 @@ export async function POST(request: Request) {
         { status: 401 },
       )
     }
+
+    void recordUsageEvent(
+      {
+        eventType: "login_success",
+        guildId: memberRow.guild_id,
+        memberId: memberRow.id,
+      },
+      admin,
+    )
 
     const member = rowToMember(memberRow)
     return NextResponse.json({

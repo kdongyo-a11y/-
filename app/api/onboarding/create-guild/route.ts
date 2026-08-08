@@ -7,6 +7,7 @@ import {
   checkOnboardingRateLimit,
   resolveClientKey,
 } from "@/lib/onboarding-rate-limit"
+import { recordUsageEventForGuild } from "@/lib/platform/usage-events"
 
 const MAX_BODY_BYTES = 4096
 
@@ -69,6 +70,14 @@ export async function POST(request: Request) {
     if (!result.ok) {
       return NextResponse.json({ ok: false, message: result.message }, { status: result.status })
     }
+
+    void recordUsageEventForGuild(
+      "guild_created",
+      result.guild.id,
+      result.adminMember.id,
+      null,
+      admin,
+    )
 
     return NextResponse.json({
       ok: true,

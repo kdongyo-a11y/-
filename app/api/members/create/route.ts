@@ -10,6 +10,7 @@ import {
   type MemberProgramRole,
   type MemberStatus,
 } from "@/lib/member-types"
+import { recordUsageEventFromActor } from "@/lib/platform/usage-events"
 
 type CreateBody = {
   nickname?: string
@@ -74,6 +75,8 @@ export async function POST(request: Request) {
     if (!result.ok) {
       return NextResponse.json({ ok: false, message: result.message }, { status: result.status })
     }
+
+    void recordUsageEventFromActor("member_created", actor, null, admin)
 
     return NextResponse.json({
       ok: true,

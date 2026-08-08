@@ -11,6 +11,7 @@ import {
 import { getSlotConfig } from "@/lib/boss-time-slots"
 import { formatDbError } from "@/lib/supabase/db-errors"
 import { actorGuildId } from "@/lib/supabase/guild-scope-helpers"
+import { recordUsageEventFromActor } from "@/lib/platform/usage-events"
 
 async function hasBossSettlement(
   admin: ReturnType<typeof import("@/lib/supabase/admin").createAdminClient>,
@@ -190,6 +191,13 @@ export async function POST(request: Request) {
         )
       }
     }
+
+    void recordUsageEventFromActor(
+      "boss_check_started",
+      authResult.member,
+      { slotType: slotConfig.type },
+      admin,
+    )
 
     return NextResponse.json({ ok: true, message: "참여체크를 시작했습니다." })
   } catch (error) {

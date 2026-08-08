@@ -8,6 +8,7 @@ import { errorToMessage } from "@/lib/supabase/db-errors"
 import { cancelLedgerBySource, upsertLedgerEntry } from "@/lib/supabase/finance-data"
 import { actorGuildId, requireExpenseInActorGuild } from "@/lib/supabase/guild-scope-helpers"
 import type { CreateExpenseInput, UpdateExpenseInput } from "@/lib/expense-types"
+import { recordUsageEventFromActor } from "@/lib/platform/usage-events"
 
 type Body = {
   action?: string
@@ -89,6 +90,8 @@ export async function POST(request: Request) {
           memo: "지출 등록",
           created_by: actorId,
         })
+
+        void recordUsageEventFromActor("expense_created", authResult.member, null, admin)
 
         return NextResponse.json({ ok: true, message: "지출이 등록되었습니다.", expenseId: expense.id })
       }

@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { requireAuthenticatedMember } from "@/lib/supabase/auth-helpers"
 import { slotIdFromEvent } from "@/lib/supabase/boss-mapper"
 import { actorGuildId } from "@/lib/supabase/guild-scope-helpers"
+import { recordUsageEventFromActor } from "@/lib/platform/usage-events"
 
 export async function POST(request: Request) {
   try {
@@ -92,6 +93,13 @@ export async function POST(request: Request) {
         return NextResponse.json({ ok: false, message: "참여 등록에 실패했습니다." }, { status: 500 })
       }
     }
+
+    void recordUsageEventFromActor(
+      "boss_participation",
+      authResult.member,
+      { slotType: openEvent.slot_type },
+      admin,
+    )
 
     return NextResponse.json({
       ok: true,

@@ -26,6 +26,7 @@ import {
 import { GUILD_SHARE_LEDGER_SUFFIX } from "@/lib/guild-fund-utils"
 import { upsertLedgerEntry } from "@/lib/supabase/finance-data"
 import { makeSettlementKey, type Settlement, type SettlementSourceType } from "@/lib/settlement-types"
+import { recordUsageEvent } from "@/lib/platform/usage-events"
 
 function settlementLedgerSourceType(sourceType: SettlementSourceType): string {
   return sourceType === "boss" ? "boss_settlement" : "siege_settlement"
@@ -158,6 +159,16 @@ export async function createBossSettlementOnServer(
   await persistSettlement(admin, settlement, actorId, guildId)
   await postSettlementGuildShareLedger(admin, guildId, settlement)
 
+  void recordUsageEvent(
+    {
+      eventType: "settlement_created",
+      guildId,
+      memberId: actorId,
+      metadata: { sourceType: "boss" },
+    },
+    admin,
+  )
+
   return { ok: true, message: "정산이 생성되었습니다." }
 }
 
@@ -251,6 +262,16 @@ export async function createSiegeSettlementOnServer(
     .eq("id", siege.id)
     .eq("guild_id", guildId)
 
+  void recordUsageEvent(
+    {
+      eventType: "settlement_created",
+      guildId,
+      memberId: actorId,
+      metadata: { sourceType: "siege" },
+    },
+    admin,
+  )
+
   return { ok: true, message: "공성 정산이 생성되었습니다." }
 }
 
@@ -267,6 +288,19 @@ export async function loadAndUpdateSettlement(
   if (!prev) return { ok: false, message: "정산이 없습니다." }
   const next = finalize(updater(prev))
   await persistSettlement(admin, next, actorId, guildId, options)
+
+  if (prev.overallStatus !== "completed" && next.overallStatus === "completed") {
+    void recordUsageEvent(
+      {
+        eventType: "settlement_completed",
+        guildId,
+        memberId: actorId,
+        metadata: { sourceType },
+      },
+      admin,
+    )
+  }
+
   return { ok: true, message: "저장되었습니다.", settlement: next }
 }
 

@@ -5,6 +5,7 @@ import { requireAuthenticatedMember } from "@/lib/supabase/auth-helpers"
 import { requireManagerOrAdmin } from "@/lib/supabase/operation-auth"
 import { getBossEventBySlotId } from "@/lib/supabase/boss-event-helpers"
 import { actorGuildId, requireMemberInActorGuild } from "@/lib/supabase/guild-scope-helpers"
+import { recordUsageEvent } from "@/lib/platform/usage-events"
 
 type Body = {
   slotId?: string
@@ -98,6 +99,16 @@ export async function POST(request: Request) {
         action: "수동추가",
         created_by: authResult.member.id,
       })
+
+      void recordUsageEvent(
+        {
+          eventType: "boss_participation",
+          guildId,
+          memberId: body.memberId,
+          metadata: { slotType: event.slot_type, source: "manual" },
+        },
+        admin,
+      )
     } else {
       await admin
         .from("boss_participations")
