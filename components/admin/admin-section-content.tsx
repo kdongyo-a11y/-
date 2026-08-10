@@ -7,10 +7,12 @@ import { AdminBossDetailView } from "@/components/admin/admin-boss-detail-view"
 import { AdminSiegeView } from "@/components/admin/admin-siege-view"
 import { AdminMembersView } from "@/components/admin/admin-members-view"
 import { AdminFinanceView } from "@/components/admin/admin-finance-view"
+import { AdminFinanceStatusView } from "@/components/admin/admin-finance-status-view"
 import { AdminContributionView } from "@/components/admin/admin-contribution-view"
 import { AdminDuesDetailView } from "@/components/admin/admin-dues-detail-view"
 import { AdminInitialDataView } from "@/components/admin/admin-initial-data-view"
 import { AdminOpeningBalanceView } from "@/components/admin/admin-opening-balance-view"
+import { AdminCashCheckpointView } from "@/components/admin/admin-cash-checkpoint-view"
 import { AdminBulkMembersView } from "@/components/admin/admin-bulk-members-view"
 import { AdminContributionSettingsView } from "@/components/admin/admin-contribution-settings-view"
 import { AdminOperationSettingsView } from "@/components/admin/admin-operation-settings-view"
@@ -68,6 +70,9 @@ export function AdminSectionContent({ nav, onNavigate }: Props) {
       if (nav.duesBillId) {
         return <AdminDuesDetailView billId={nav.duesBillId} onNavigate={onNavigate} />
       }
+      if ((nav.financeTab ?? "status") === "status") {
+        return <AdminFinanceStatusView onNavigate={onNavigate} />
+      }
       return (
         <AdminFinanceView tab={nav.financeTab ?? "settlements"} onNavigate={onNavigate} />
       )
@@ -90,6 +95,9 @@ export function AdminSectionContent({ nav, onNavigate }: Props) {
       }
       if (tab === "opening_balance") {
         return <AdminOpeningBalanceView onNavigate={onNavigate} />
+      }
+      if (tab === "cash_checkpoint") {
+        return <AdminCashCheckpointView onNavigate={onNavigate} />
       }
       if (tab === "bulk_members") {
         return <AdminBulkMembersView onNavigate={onNavigate} />

@@ -22,6 +22,7 @@ type Props = {
 }
 
 const TAB_LABELS: Record<FinanceTab, string> = {
+  status: "혈맹 재정 현황",
   settlements: "정산 현황",
   dues: "혈비 관리",
   expenses: "지출 관리",

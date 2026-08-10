@@ -46,6 +46,8 @@ import { applyGuildShareRoundingAndLedger } from "@/lib/supabase/money-rounding-
 import { upsertLedgerEntry } from "@/lib/supabase/finance-data"
 import { makeSettlementKey, type Settlement, type SettlementSourceType } from "@/lib/settlement-types"
 import { recordUsageEvent } from "@/lib/platform/usage-events"
+import { sumConfirmedReceiptsForSettlement } from "@/lib/supabase/settlement-revenue-receipt-data"
+import { validateRevisionAgainstReceipts } from "@/lib/settlement-revenue-receipt-utils"
 
 function settlementLedgerSourceType(sourceType: SettlementSourceType): string {
   return sourceType === "boss" ? "boss_settlement" : "siege_settlement"
@@ -476,6 +478,13 @@ export async function reviseSettlementOnServer(
   const revised = reviseSettlementParticipants(prev, resolvedAttendees, reason.trim())
   const latestLog = revised.revisionLogs[revised.revisionLogs.length - 1]
   const latestSnapshot = revised.revisionSnapshots[revised.revisionSnapshots.length - 1]
+
+  const settlementDbId = await getSettlementDbId(admin, guildId, sourceType, sourceId)
+  if (settlementDbId) {
+    const receiptTotal = await sumConfirmedReceiptsForSettlement(admin, guildId, settlementDbId)
+    const receiptGuard = validateRevisionAgainstReceipts(revised.totalRevenue, receiptTotal)
+    if (!receiptGuard.ok) return { ok: false, message: receiptGuard.message }
+  }
 
   await persistSettlement(admin, revised, actorId, guildId, {
     newRevisionLog:

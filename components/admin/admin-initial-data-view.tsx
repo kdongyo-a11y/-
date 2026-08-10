@@ -33,6 +33,12 @@ export function AdminInitialDataView({ onNavigate }: Props) {
         />
         <MenuCard
           icon={<Database className="h-4 w-4" />}
+          title="실보유액 기준점"
+          description="Finance 2.0 go-live 시점의 실제 혈맹 금고 잔액 baseline을 설정합니다."
+          onClick={() => onNavigate(initialDataTabNav("cash_checkpoint"))}
+        />
+        <MenuCard
+          icon={<Database className="h-4 w-4" />}
           title="기초 혈맹자금"
           description="프로그램 사용 시작 이전부터 보유하고 있던 혈맹 자금을 입력합니다."
           onClick={() => onNavigate(initialDataTabNav("opening_balance"))}

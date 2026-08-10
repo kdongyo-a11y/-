@@ -284,6 +284,52 @@ export const financeApi = {
     }),
 }
 
+export async function fetchFinanceSummary(): Promise<{
+  ok: boolean
+  summary?: import("@/lib/finance-summary-types").FinanceSummary
+  message?: string
+}> {
+  const res = await fetch("/api/finance/summary")
+  return res.json()
+}
+
+export async function fetchCashCheckpoints(): Promise<{
+  ok: boolean
+  checkpoints?: import("@/lib/guild-cash-types").GuildCashCheckpoint[]
+  message?: string
+}> {
+  const res = await fetch("/api/finance/cash-checkpoint")
+  return res.json()
+}
+
+export async function createCashCheckpoint(input: {
+  effectiveAt: string
+  openingCashBalance: number
+  memo: string
+}): Promise<{ ok: boolean; message: string }> {
+  const res = await fetch("/api/finance/cash-checkpoint", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "create_checkpoint", ...input }),
+  })
+  return res.json()
+}
+
+export async function confirmRevenueReceipt(input: {
+  sourceType: "boss" | "siege"
+  sourceId: string
+  amount: number
+  memo?: string
+  receivedAt?: string
+}): Promise<{ ok: boolean; message: string }> {
+  const res = await fetch("/api/finance/revenue-receipt", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "confirm_receipt", ...input }),
+  })
+  return res.json()
+}
+
 export async function fetchDuesBills(): Promise<{
   ok: boolean
   bills?: import("@/lib/dues-types").DuesBill[]

@@ -17,7 +17,7 @@ export function memberDetailNav(memberId: string): AdminNavState {
 }
 
 export function financeTabNav(tab: AdminNavState["financeTab"]): AdminNavState {
-  return { section: "finance", financeTab: tab ?? "settlements" }
+  return { section: "finance", financeTab: tab ?? "status" }
 }
 
 export function duesBillNav(billId: string): AdminNavState {

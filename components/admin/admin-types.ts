@@ -9,11 +9,12 @@ export type AdminSection =
   | "initialData"
   | "dataManagement"
 
-export type FinanceTab = "settlements" | "dues" | "expenses"
+export type FinanceTab = "status" | "settlements" | "dues" | "expenses"
 
 export type InitialDataTab =
   | "guild_profile"
   | "opening_balance"
+  | "cash_checkpoint"
   | "bulk_members"
   | "contribution_scores"
   | "operation_policy"
