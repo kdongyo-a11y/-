@@ -24,8 +24,23 @@ import {
 } from "@/lib/settlement-revision-utils"
 import {
   getSettlementByKey,
+  getSettlementDbId,
   persistSettlement,
 } from "@/lib/supabase/settlement-data"
+import {
+  appendManagementPaymentLog,
+  createManagementPaymentsOnSettlementCreate,
+  getManagementPaymentBySettlementMember,
+  paymentSnapshotForLog,
+  persistManagementPayments,
+  syncPaymentStatus,
+} from "@/lib/supabase/settlement-management-payment-data"
+import type { SettlementManagementPayment } from "@/lib/settlement-management-payment-types"
+import {
+  onManagementAdminPaid,
+  onManagementAdminPaidCancelled,
+  onManagementMemberConfirmed,
+} from "@/lib/settlement-management-payment-utils"
 import { GUILD_SHARE_LEDGER_SUFFIX } from "@/lib/guild-fund-utils"
 import { applyGuildShareRoundingAndLedger } from "@/lib/supabase/money-rounding-data"
 import { upsertLedgerEntry } from "@/lib/supabase/finance-data"
@@ -280,6 +295,10 @@ export async function createBossSettlementOnServer(
   )
 
   await persistSettlement(admin, settlement, actorId, guildId)
+  const bossSettlementId = await getSettlementDbId(admin, guildId, "boss", slotId)
+  if (bossSettlementId) {
+    await createManagementPaymentsOnSettlementCreate(admin, guildId, bossSettlementId, settlement)
+  }
   await postSettlementGuildShareLedger(admin, guildId, settlement)
 
   void recordUsageEvent(
@@ -378,6 +397,10 @@ export async function createSiegeSettlementOnServer(
   )
 
   await persistSettlement(admin, settlement, actorId, guildId)
+  const siegeSettlementId = await getSettlementDbId(admin, guildId, "siege", siegeId)
+  if (siegeSettlementId) {
+    await createManagementPaymentsOnSettlementCreate(admin, guildId, siegeSettlementId, settlement)
+  }
   await postSettlementGuildShareLedger(admin, guildId, settlement)
 
   await admin
@@ -467,6 +490,55 @@ export async function reviseSettlementOnServer(
     ok: true,
     message: `정산 v${revised.revision}으로 수정되었습니다. (1인 ${revised.perPersonAmount.toLocaleString("ko-KR")}원)`,
   }
+}
+
+export async function loadAndUpdateManagementPayment(
+  admin: SupabaseClient,
+  actorId: string,
+  guildId: string,
+  sourceType: SettlementSourceType,
+  sourceId: string,
+  targetMemberId: string,
+  updater: (payment: SettlementManagementPayment) => SettlementManagementPayment | null,
+  logMeta: { action: string; reason?: string },
+): Promise<{ ok: boolean; message: string }> {
+  const settlementDbId = await getSettlementDbId(admin, guildId, sourceType, sourceId)
+  if (!settlementDbId) return { ok: false, message: "정산이 없습니다." }
+
+  const payment = await getManagementPaymentBySettlementMember(
+    admin,
+    guildId,
+    settlementDbId,
+    targetMemberId,
+  )
+  if (!payment) return { ok: false, message: "관리비 지급 대상이 아닙니다." }
+
+  const before = paymentSnapshotForLog(payment)
+  const updated = updater(payment)
+  if (!updated) return { ok: false, message: "변경할 수 없습니다." }
+
+  const synced = syncPaymentStatus(updated)
+  if (
+    before.adminPaid === synced.adminPaid &&
+    before.memberConfirmed === synced.memberConfirmed &&
+    before.memo === synced.memo
+  ) {
+    return { ok: false, message: "이미 처리된 상태입니다." }
+  }
+
+  await persistManagementPayments(admin, guildId, settlementDbId, [synced])
+  await appendManagementPaymentLog(
+    admin,
+    guildId,
+    synced.id,
+    logMeta.action,
+    before,
+    paymentSnapshotForLog(synced),
+    actorId,
+    logMeta.reason ?? "",
+  )
+
+  return { ok: true, message: "저장되었습니다." }
 }
 
 export {

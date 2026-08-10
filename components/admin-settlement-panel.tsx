@@ -13,7 +13,9 @@ import { calcSettlementPreview } from "@/lib/settlement-preview-utils"
 import { formatWon } from "@/lib/guild-data"
 import { generateDaySlots } from "@/lib/boss-time-slots"
 import { SettlementRoundingPreview } from "@/components/admin/settlement-rounding-preview"
+import { SettlementManagementFeeSection } from "@/components/settlement-management-fee-section"
 import { useGuildOperationSettings } from "@/components/admin/use-guild-operation-settings"
+import { useAuth } from "@/components/auth-context"
 import { parseSlotIdToOccurredAtIso } from "@/lib/event-occurred-at-utils"
 import { cn } from "@/lib/utils"
 
@@ -36,7 +38,10 @@ export function AdminSettlementPanel({ slotId: controlledSlotId, embedded = fals
     cancelAdminPaymentConfirmation,
     cancelAdditionalAdminPaymentConfirmation,
     confirmAdditionalAdminPayment,
+    confirmManagementAdminPayment,
+    cancelManagementAdminPayment,
   } = useSettlement()
+  const { canManageRoles } = useAuth()
 
   const closedSlots = useMemo(
     () => slots.filter((s) => getCheck(s.id).status === "closed"),
@@ -270,6 +275,22 @@ export function AdminSettlementPanel({ slotId: controlledSlotId, embedded = fals
           )}
 
           {settlement.revision > 1 && <SettlementRevisionSummary settlement={settlement} />}
+
+          <SettlementManagementFeeSection
+            settlement={settlement}
+            sourceType="boss"
+            sourceId={selectedSlotId}
+            canMarkAdminPaid={canManageRoles}
+            onConfirmAdminPayment={async (memberId) => {
+              const r = await confirmManagementAdminPayment("boss", selectedSlotId, memberId)
+              if (!r.ok) alert(r.message)
+            }}
+            onCancelAdminPayment={async (memberId) => {
+              if (!window.confirm("관리비 지급 완료 확인을 취소하시겠습니까?")) return
+              const r = await cancelManagementAdminPayment("boss", selectedSlotId, memberId)
+              if (!r.ok) alert(r.message)
+            }}
+          />
 
           <div className="flex items-center justify-between">
             <SectionTitle>참여자 분배</SectionTitle>

@@ -1,4 +1,5 @@
 import type { OperationPolicySnapshot } from "@/lib/operation-settings-types"
+import type { SettlementManagementPayment } from "@/lib/settlement-management-payment-types"
 
 export type SettlementSourceType = "boss" | "siege"
 
@@ -127,6 +128,8 @@ export type Settlement = {
   managementFeeModeApplied?: string
   managementFeePercentageApplied?: number | null
   participants: SettlementParticipant[]
+  /** Phase 9d — 관리비 지급 추적 (snapshot 금액 고정) */
+  managementPayments?: SettlementManagementPayment[]
   revisionSnapshots: SettlementRevisionSnapshot[]
   revisionLogs: SettlementRevisionLog[]
   modificationLogs: SettlementModificationLog[]

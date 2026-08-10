@@ -21,6 +21,8 @@ import {
 import { useSiege } from "@/components/siege-context"
 import { useGuildLedger } from "@/components/guild-ledger-context"
 import { fetchSettlements, settlementApi } from "@/lib/operations-api"
+import { getPendingManagementFeesForMember } from "@/lib/settlement-management-payment-utils"
+import type { PendingManagementFeeItem } from "@/lib/settlement-management-payment-types"
 import {
   makeSettlementKey,
   type Settlement,
@@ -58,6 +60,7 @@ type SettlementContextValue = {
   getMemberSettlements: (memberId: string) => MemberSettlementItem[]
   getMemberReceivedPayoutTotal: (memberId: string) => number
   getPendingReceipts: (memberId: string) => PendingReceiptItem[]
+  getPendingManagementFees: (memberId: string) => PendingManagementFeeItem[]
   getPendingReturns: (memberId: string) => PendingReturnItem[]
   createBossSettlement: (
     slotId: string,
@@ -95,6 +98,20 @@ type SettlementContextValue = {
   confirmMemberReceipt: (
     sourceType: SettlementSourceType,
     sourceId: string,
+  ) => Promise<{ ok: boolean; message: string }>
+  confirmManagementMemberReceipt: (
+    sourceType: SettlementSourceType,
+    sourceId: string,
+  ) => Promise<{ ok: boolean; message: string }>
+  confirmManagementAdminPayment: (
+    sourceType: SettlementSourceType,
+    sourceId: string,
+    memberId: string,
+  ) => Promise<{ ok: boolean; message: string }>
+  cancelManagementAdminPayment: (
+    sourceType: SettlementSourceType,
+    sourceId: string,
+    memberId: string,
   ) => Promise<{ ok: boolean; message: string }>
   confirmMemberReturn: (
     sourceType: SettlementSourceType,
@@ -328,6 +345,13 @@ export function SettlementProvider({ children }: { children: ReactNode }) {
     [settlements],
   )
 
+  const getPendingManagementFees = useCallback(
+    (memberId: string): PendingManagementFeeItem[] => {
+      return getPendingManagementFeesForMember(settlements, memberId)
+    },
+    [settlements],
+  )
+
   const getPendingReturns = useCallback(
     (memberId: string): PendingReturnItem[] => {
       return Object.entries(settlements)
@@ -474,6 +498,44 @@ export function SettlementProvider({ children }: { children: ReactNode }) {
     [afterSettlementMutation],
   )
 
+  const confirmManagementMemberReceipt = useCallback(
+    async (
+      sourceType: SettlementSourceType,
+      sourceId: string,
+    ): Promise<{ ok: boolean; message: string }> => {
+      const result = await settlementApi.confirmManagementMemberReceipt(sourceType, sourceId)
+      if (result.ok) await afterSettlementMutation()
+      return result
+    },
+    [afterSettlementMutation],
+  )
+
+  const confirmManagementAdminPayment = useCallback(
+    async (
+      sourceType: SettlementSourceType,
+      sourceId: string,
+      memberId: string,
+    ): Promise<{ ok: boolean; message: string }> => {
+      const result = await settlementApi.confirmManagementAdminPayment(sourceType, sourceId, memberId)
+      if (result.ok) await refreshSettlements()
+      return result
+    },
+    [refreshSettlements],
+  )
+
+  const cancelManagementAdminPayment = useCallback(
+    async (
+      sourceType: SettlementSourceType,
+      sourceId: string,
+      memberId: string,
+    ): Promise<{ ok: boolean; message: string }> => {
+      const result = await settlementApi.cancelManagementAdminPayment(sourceType, sourceId, memberId)
+      if (result.ok) await refreshSettlements()
+      return result
+    },
+    [refreshSettlements],
+  )
+
   const confirmAdditionalMemberReceipt = confirmMemberReceipt
 
   const confirmMemberReturn = useCallback(
@@ -603,6 +665,7 @@ export function SettlementProvider({ children }: { children: ReactNode }) {
       getMemberSettlements,
       getMemberReceivedPayoutTotal,
       getPendingReceipts,
+      getPendingManagementFees,
       getPendingReturns,
       createBossSettlement,
       createSiegeSettlement,
@@ -611,6 +674,9 @@ export function SettlementProvider({ children }: { children: ReactNode }) {
       confirmAdminPayment,
       confirmAllAdminPayments,
       confirmMemberReceipt,
+      confirmManagementMemberReceipt,
+      confirmManagementAdminPayment,
+      cancelManagementAdminPayment,
       confirmMemberReturn,
       confirmAdminReturn,
       cancelAdminReturnConfirmation,
@@ -635,6 +701,7 @@ export function SettlementProvider({ children }: { children: ReactNode }) {
       getMemberSettlements,
       getMemberReceivedPayoutTotal,
       getPendingReceipts,
+      getPendingManagementFees,
       getPendingReturns,
       createBossSettlement,
       createSiegeSettlement,
@@ -643,6 +710,9 @@ export function SettlementProvider({ children }: { children: ReactNode }) {
       confirmAdminPayment,
       confirmAllAdminPayments,
       confirmMemberReceipt,
+      confirmManagementMemberReceipt,
+      confirmManagementAdminPayment,
+      cancelManagementAdminPayment,
       confirmMemberReturn,
       confirmAdminReturn,
       cancelAdminReturnConfirmation,

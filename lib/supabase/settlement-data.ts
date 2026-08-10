@@ -10,6 +10,11 @@ import {
   type SettlementRevisionRow,
   type SettlementRow,
 } from "@/lib/supabase/settlement-mapper"
+import { fetchManagementPaymentsForSettlements } from "@/lib/supabase/settlement-management-payment-data"
+import {
+  createManagementPaymentsOnSettlementCreate,
+  persistManagementPayments,
+} from "@/lib/supabase/settlement-management-payment-data"
 
 export async function fetchSettlementOperationalData(supabase: SupabaseClient) {
   const { data: rows, error } = await supabase.from("settlements").select("*").order("created_at", {
@@ -25,11 +30,12 @@ export async function fetchSettlementOperationalData(supabase: SupabaseClient) {
 
   const ids = settlementRows.map((r) => r.id)
 
-  const [membersRes, revisionsRes, logsRes, namesRes] = await Promise.all([
+  const [membersRes, revisionsRes, logsRes, namesRes, mgmtPaymentsMap] = await Promise.all([
     supabase.from("settlement_members").select("*").in("settlement_id", ids),
     supabase.from("settlement_revisions").select("*").in("settlement_id", ids),
     supabase.from("settlement_modification_logs").select("*").in("settlement_id", ids),
     supabase.from("members").select("id, nickname"),
+    fetchManagementPaymentsForSettlements(supabase, ids),
   ])
 
   if (membersRes.error) throw membersRes.error
@@ -47,6 +53,7 @@ export async function fetchSettlementOperationalData(supabase: SupabaseClient) {
     (revisionsRes.data ?? []) as SettlementRevisionRow[],
     (logsRes.data ?? []) as SettlementModificationLogRow[],
     memberNames,
+    mgmtPaymentsMap,
   )
 
   return { settlements }
@@ -63,6 +70,7 @@ export async function persistSettlement(
       log: Settlement["revisionLogs"][number]
     }
     newModificationLog?: Settlement["modificationLogs"][number]
+    persistManagementPayments?: boolean
   },
 ): Promise<{ settlementId: string }> {
   const { data: existing } = await admin
@@ -158,6 +166,15 @@ export async function persistSettlement(
     })
   }
 
+  if (options?.persistManagementPayments && settlement.managementPayments?.length) {
+    await persistManagementPayments(
+      admin,
+      guildId,
+      settlementId!,
+      settlement.managementPayments,
+    )
+  }
+
   return { settlementId: settlementId! }
 }
 
@@ -178,11 +195,12 @@ export async function getSettlementByKey(
   if (!row) return null
 
   const settlementId = row.id as string
-  const [membersRes, revisionsRes, logsRes, namesRes] = await Promise.all([
+  const [membersRes, revisionsRes, logsRes, namesRes, mgmtPaymentsMap] = await Promise.all([
     admin.from("settlement_members").select("*").eq("settlement_id", settlementId),
     admin.from("settlement_revisions").select("*").eq("settlement_id", settlementId),
     admin.from("settlement_modification_logs").select("*").eq("settlement_id", settlementId),
     admin.from("members").select("id, nickname").eq("guild_id", guildId),
+    fetchManagementPaymentsForSettlements(admin, [settlementId]),
   ])
 
   const memberNames = new Map(
@@ -195,9 +213,27 @@ export async function getSettlementByKey(
     (revisionsRes.data ?? []) as SettlementRevisionRow[],
     (logsRes.data ?? []) as SettlementModificationLogRow[],
     memberNames,
+    mgmtPaymentsMap,
   )
 
   return map[makeSettlementKey(sourceType, sourceId)] ?? null
+}
+
+export async function getSettlementDbId(
+  admin: SupabaseClient,
+  guildId: string,
+  sourceType: Settlement["sourceType"],
+  sourceId: string,
+): Promise<string | null> {
+  const { data } = await admin
+    .from("settlements")
+    .select("id")
+    .eq("guild_id", guildId)
+    .eq("source_type", sourceType)
+    .eq("source_id", sourceId)
+    .maybeSingle()
+
+  return (data?.id as string | undefined) ?? null
 }
 
 export async function getSettlementByIdForGuild(

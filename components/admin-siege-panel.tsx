@@ -29,7 +29,9 @@ import {
   SettlementRevisionSummary,
 } from "@/components/admin/settlement-revision-ui"
 import { SettlementRoundingPreview } from "@/components/admin/settlement-rounding-preview"
+import { SettlementManagementFeeSection } from "@/components/settlement-management-fee-section"
 import { useGuildOperationSettings } from "@/components/admin/use-guild-operation-settings"
+import { useAuth } from "@/components/auth-context"
 import { siegeEventOccurredAtIso } from "@/lib/event-occurred-at-utils"
 import { calcSettlementPreview } from "@/lib/settlement-preview-utils"
 import type { SettlementCalcResult } from "@/lib/settlement-utils"
@@ -84,7 +86,10 @@ export function AdminSiegePanel({ siegeId: controlledSiegeId, embedded = false }
     cancelAdminPaymentConfirmation,
     cancelAdditionalAdminPaymentConfirmation,
     confirmAdditionalAdminPayment,
+    confirmManagementAdminPayment,
+    cancelManagementAdminPayment,
   } = useSettlement()
+  const { canManageRoles } = useAuth()
 
   const [showAddPicker, setShowAddPicker] = useState(false)
 
@@ -846,6 +851,16 @@ export function AdminSiegePanel({ siegeId: controlledSiegeId, embedded = false }
                   onModify={(memberId, name, field, current) =>
                     setModifyModal({ memberId, name, field, current })
                   }
+                  canMarkManagementPaid={canManageRoles}
+                  onConfirmManagementPay={async (memberId) => {
+                    const r = await confirmManagementAdminPayment("siege", selectedSiege.id, memberId)
+                    if (!r.ok) alert(r.message)
+                  }}
+                  onCancelManagementPay={async (memberId) => {
+                    if (!window.confirm("관리비 지급 완료 확인을 취소하시겠습니까?")) return
+                    const r = await cancelManagementAdminPayment("siege", selectedSiege.id, memberId)
+                    if (!r.ok) alert(r.message)
+                  }}
                 />
               )}
 
@@ -1211,6 +1226,9 @@ function SettlementView({
   onCancelAdditionalPayment,
   onCancelAdminPayment,
   onModify,
+  canMarkManagementPaid,
+  onConfirmManagementPay,
+  onCancelManagementPay,
 }: {
   settlement: NonNullable<ReturnType<ReturnType<typeof useSettlement>["getSiegeSettlement"]>>
   summary: NonNullable<ReturnType<ReturnType<typeof useSettlement>["getSettlementSummary"]>>
@@ -1228,6 +1246,9 @@ function SettlementView({
     field: "adminPaid" | "memberReceived",
     current: boolean,
   ) => void
+  canMarkManagementPaid: boolean
+  onConfirmManagementPay: (memberId: string) => void | Promise<void>
+  onCancelManagementPay: (memberId: string) => void | Promise<void>
 }) {
   return (
     <div className="mb-4 flex flex-col gap-3">
@@ -1254,6 +1275,15 @@ function SettlementView({
       </Card>
 
       {settlement.revision > 1 && <SettlementRevisionSummary settlement={settlement} />}
+
+      <SettlementManagementFeeSection
+        settlement={settlement}
+        sourceType="siege"
+        sourceId={siegeId}
+        canMarkAdminPaid={canMarkManagementPaid}
+        onConfirmAdminPayment={onConfirmManagementPay}
+        onCancelAdminPayment={onCancelManagementPay}
+      />
 
       <div className="flex items-center justify-between">
         <SectionTitle>참여자 분배</SectionTitle>

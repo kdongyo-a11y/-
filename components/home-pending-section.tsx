@@ -13,6 +13,7 @@ import { useNavigation } from "@/components/navigation-context"
 import { useCurrentMemberId } from "@/components/auth-context"
 import { formatWon } from "@/lib/guild-data"
 import type { PendingReceiptItem, SettlementSourceType } from "@/lib/settlement-types"
+import type { PendingManagementFeeItem } from "@/lib/settlement-management-payment-types"
 
 const MAX_VISIBLE = 3
 
@@ -20,6 +21,10 @@ type CompactItem =
   | {
       kind: "payout"
       receipt: PendingReceiptItem
+    }
+  | {
+      kind: "management_fee"
+      item: PendingManagementFeeItem
     }
   | {
       kind: "return"
@@ -40,8 +45,10 @@ export function HomePendingSection() {
   const { getActiveSurveySiege, needsSurveyResponse } = useSiege()
   const {
     getPendingReceipts,
+    getPendingManagementFees,
     getPendingReturns,
     confirmMemberReceipt,
+    confirmManagementMemberReceipt,
     confirmMemberReturn,
   } = useSettlement()
   const { getUnpaidBillsForMember } = useDues()
@@ -49,6 +56,7 @@ export function HomePendingSection() {
 
   const memberId = useCurrentMemberId()
   const pendingReceipts = getPendingReceipts(memberId)
+  const pendingManagementFees = getPendingManagementFees(memberId)
   const pendingReturns = getPendingReturns(memberId)
   const unpaidBills = getUnpaidBillsForMember(memberId)
   const openBossCheck = getOpenCheck()
@@ -81,6 +89,10 @@ export function HomePendingSection() {
       items.push({ kind: "payout", receipt })
     }
 
+    for (const mgmt of pendingManagementFees) {
+      items.push({ kind: "management_fee", item: mgmt })
+    }
+
     for (const bill of unpaidBills) {
       const [, m, d] = bill.dueDate.split("-")
       items.push({
@@ -94,7 +106,7 @@ export function HomePendingSection() {
     }
 
     return items
-  }, [pendingReceipts, pendingReturns, unpaidBills])
+  }, [pendingReceipts, pendingManagementFees, pendingReturns, unpaidBills])
 
   const actionCount =
     compactItems.length + (siegeSurveyPending ? 1 : 0) + (bossParticipationPending ? 1 : 0)
@@ -110,6 +122,13 @@ export function HomePendingSection() {
   function handleReturn(sourceType: SettlementSourceType, sourceId: string) {
     void (async () => {
       const r = await confirmMemberReturn(sourceType, sourceId)
+      if (!r.ok) alert(r.message)
+    })()
+  }
+
+  function handleManagementReceipt(sourceType: SettlementSourceType, sourceId: string) {
+    void (async () => {
+      const r = await confirmManagementMemberReceipt(sourceType, sourceId)
       if (!r.ok) alert(r.message)
     })()
   }
@@ -174,6 +193,16 @@ export function HomePendingSection() {
                 key={`payout-${item.receipt.sourceType}-${item.receipt.sourceId}-${item.receipt.kind}`}
                 receipt={item.receipt}
                 onConfirm={() => handleReceipt(item.receipt.sourceType, item.receipt.sourceId)}
+              />
+            )
+          }
+
+          if (item.kind === "management_fee") {
+            return (
+              <ManagementFeePendingCard
+                key={`mgmt-${item.item.sourceType}-${item.item.sourceId}`}
+                item={item.item}
+                onConfirm={() => handleManagementReceipt(item.item.sourceType, item.item.sourceId)}
               />
             )
           }
@@ -325,6 +354,49 @@ function PayoutPendingCard({
       ) : (
         <p className="mt-3 rounded-xl border border-primary/30 bg-primary/5 py-2.5 text-center text-sm font-medium text-primary">
           관리자 추가 지급 확인 대기
+        </p>
+      )}
+    </Card>
+  )
+}
+
+function ManagementFeePendingCard({
+  item,
+  onConfirm,
+}: {
+  item: PendingManagementFeeItem
+  onConfirm: () => void
+}) {
+  return (
+    <Card className="overflow-hidden border-violet-500/25 bg-gradient-to-br from-violet-500/10 to-card">
+      <div className="flex items-start gap-3">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-violet-500/15 text-violet-600 dark:text-violet-400">
+          <Wallet className="h-4 w-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-medium text-violet-600 dark:text-violet-400">
+            관리비 지급 완료 · 수령 확인 필요
+          </p>
+          <p className="mt-0.5 text-sm font-semibold text-foreground">{item.displayTitle}</p>
+          {item.displaySub && (
+            <p className="text-xs text-muted-foreground">{item.displaySub}</p>
+          )}
+          <p className="mt-1 font-mono text-lg font-semibold tabular-nums text-foreground">
+            {formatWon(item.amount)}
+          </p>
+        </div>
+      </div>
+      {item.actionable ? (
+        <button
+          type="button"
+          onClick={onConfirm}
+          className="mt-3 w-full rounded-xl bg-violet-600 py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90 dark:bg-violet-500"
+        >
+          {formatWon(item.amount)} 수령 확인
+        </button>
+      ) : (
+        <p className="mt-3 rounded-xl border border-violet-500/30 bg-violet-500/5 py-2.5 text-center text-sm font-medium text-violet-600 dark:text-violet-400">
+          관리자 지급 대기
         </p>
       )}
     </Card>

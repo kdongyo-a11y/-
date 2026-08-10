@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { requireAuthenticatedMember } from "@/lib/supabase/auth-helpers"
-import { requireManagerOrAdmin } from "@/lib/supabase/operation-auth"
+import { requireManagerOrAdmin, requireAdmin } from "@/lib/supabase/operation-auth"
 import { requireMemberInActorGuild, requireMembersInActorGuild } from "@/lib/supabase/guild-scope-helpers"
 import { errorToMessage } from "@/lib/supabase/db-errors"
 import {
@@ -10,6 +10,7 @@ import {
   createSiegeSettlementOnServer,
   derivePersonalStatusAfterPayment,
   getSettlementByKey,
+  loadAndUpdateManagementPayment,
   loadAndUpdateSettlement,
   onAdditionalAdminPaid,
   onAdditionalAdminPaymentConfirmationCancelled,
@@ -24,6 +25,11 @@ import {
 import type { SettlementModificationLog, SettlementSourceType } from "@/lib/settlement-types"
 import type { AttendeeInput } from "@/lib/settlement-revision-utils"
 import { getMemberReceiptPendingState } from "@/lib/settlement-revision-utils"
+import {
+  onManagementAdminPaid,
+  onManagementAdminPaidCancelled,
+  onManagementMemberConfirmed,
+} from "@/lib/settlement-management-payment-utils"
 
 type Body = {
   action?: string
@@ -76,6 +82,19 @@ export async function POST(request: Request) {
     const actor = authResult.member
     const actorId = actor.id
     const guildId = actor.guild_id
+
+    const adminOnlyActions = new Set([
+      "confirm_management_admin_payment",
+      "cancel_management_admin_payment",
+      "update_management_payment_memo",
+    ])
+
+    if (adminOnlyActions.has(body.action)) {
+      const adminCheck = requireAdmin(actor)
+      if (!adminCheck.ok) {
+        return NextResponse.json({ ok: false, message: adminCheck.message }, { status: adminCheck.status })
+      }
+    }
 
     const managerActions = new Set([
       "create_boss",
@@ -646,6 +665,137 @@ export async function POST(request: Request) {
               reason: body.reason!.trim(),
             },
           },
+        )
+        return NextResponse.json(result, { status: result.ok ? 200 : 400 })
+      }
+
+      case "confirm_management_admin_payment": {
+        if (body.memberId) {
+          const mc = await requireMemberInActorGuild(admin, guildId, body.memberId)
+          if (!mc.ok) {
+            return NextResponse.json({ ok: false, message: mc.message }, { status: mc.status })
+          }
+        }
+        const result = await loadAndUpdateManagementPayment(
+          admin,
+          actorId,
+          guildId,
+          body.sourceType!,
+          body.sourceId!,
+          body.memberId!,
+          (payment) => {
+            if (payment.adminPaid) return null
+            return onManagementAdminPaid(payment, actorId)
+          },
+          { action: "admin_paid", reason: "management_admin_payment_confirmed" },
+        )
+        return NextResponse.json(
+          { ...result, message: result.ok ? "관리비 지급 완료 처리되었습니다." : result.message },
+          { status: result.ok ? 200 : 400 },
+        )
+      }
+
+      case "cancel_management_admin_payment": {
+        if (body.memberId) {
+          const mc = await requireMemberInActorGuild(admin, guildId, body.memberId)
+          if (!mc.ok) {
+            return NextResponse.json({ ok: false, message: mc.message }, { status: mc.status })
+          }
+        }
+        const settlement = await getSettlementByKey(admin, guildId, body.sourceType!, body.sourceId!)
+        if (!settlement) {
+          return NextResponse.json({ ok: false, message: "정산이 없습니다." }, { status: 404 })
+        }
+        const target = settlement.managementPayments?.find((p) => p.memberId === body.memberId)
+        if (!target) {
+          return NextResponse.json({ ok: false, message: "관리비 지급 대상이 아닙니다." }, { status: 400 })
+        }
+        if (!target.adminPaid) {
+          return NextResponse.json(
+            { ok: false, message: "취소할 관리비 지급 확인이 없습니다." },
+            { status: 400 },
+          )
+        }
+        if (target.memberConfirmed) {
+          return NextResponse.json(
+            { ok: false, message: "수령 확인된 관리비는 지급 취소할 수 없습니다." },
+            { status: 400 },
+          )
+        }
+
+        const result = await loadAndUpdateManagementPayment(
+          admin,
+          actorId,
+          guildId,
+          body.sourceType!,
+          body.sourceId!,
+          body.memberId!,
+          (payment) => onManagementAdminPaidCancelled(payment),
+          { action: "admin_paid_cancelled", reason: body.reason?.trim() || "management_admin_payment_cancelled" },
+        )
+        return NextResponse.json(
+          { ...result, message: result.ok ? "관리비 지급 완료 확인이 취소되었습니다." : result.message },
+          { status: result.ok ? 200 : 400 },
+        )
+      }
+
+      case "confirm_management_member_receipt": {
+        const settlement = await getSettlementByKey(admin, guildId, body.sourceType!, body.sourceId!)
+        if (!settlement) {
+          return NextResponse.json({ ok: false, message: "정산 정보가 없습니다." }, { status: 404 })
+        }
+        const payment = settlement.managementPayments?.find((p) => p.memberId === actorId)
+        if (!payment) {
+          return NextResponse.json({ ok: false, message: "관리비 수령 대상이 아닙니다." }, { status: 400 })
+        }
+        if (!payment.adminPaid) {
+          return NextResponse.json(
+            { ok: false, message: "관리자 지급 완료 후 수령 확인할 수 있습니다." },
+            { status: 400 },
+          )
+        }
+        if (payment.memberConfirmed) {
+          return NextResponse.json({ ok: false, message: "이미 수령 확인되었습니다." }, { status: 400 })
+        }
+
+        const result = await loadAndUpdateManagementPayment(
+          admin,
+          actorId,
+          guildId,
+          body.sourceType!,
+          body.sourceId!,
+          actorId,
+          (p) => onManagementMemberConfirmed(p),
+          { action: "member_confirmed", reason: "management_member_receipt_confirmed" },
+        )
+        return NextResponse.json(
+          {
+            ...result,
+            message: result.ok
+              ? `${payment.amount.toLocaleString("ko-KR")}원 관리비 수령 확인이 완료되었습니다.`
+              : result.message,
+          },
+          { status: result.ok ? 200 : 400 },
+        )
+      }
+
+      case "update_management_payment_memo": {
+        if (body.memberId) {
+          const mc = await requireMemberInActorGuild(admin, guildId, body.memberId)
+          if (!mc.ok) {
+            return NextResponse.json({ ok: false, message: mc.message }, { status: mc.status })
+          }
+        }
+        const memo = body.memo?.trim() ?? ""
+        const result = await loadAndUpdateManagementPayment(
+          admin,
+          actorId,
+          guildId,
+          body.sourceType!,
+          body.sourceId!,
+          body.memberId!,
+          (payment) => ({ ...payment, memo: memo || null }),
+          { action: "memo_updated", reason: body.reason?.trim() || "management_payment_memo_updated" },
         )
         return NextResponse.json(result, { status: result.ok ? 200 : 400 })
       }

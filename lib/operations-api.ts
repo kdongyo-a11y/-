@@ -201,6 +201,51 @@ export const settlementApi = {
       value,
       reason,
     }),
+  confirmManagementAdminPayment: (
+    sourceType: "boss" | "siege",
+    sourceId: string,
+    memberId: string,
+  ) =>
+    postJson<{ ok: boolean; message: string }>("/api/settlements/mutate", {
+      action: "confirm_management_admin_payment",
+      sourceType,
+      sourceId,
+      memberId,
+    }),
+  cancelManagementAdminPayment: (
+    sourceType: "boss" | "siege",
+    sourceId: string,
+    memberId: string,
+    reason?: string,
+  ) =>
+    postJson<{ ok: boolean; message: string }>("/api/settlements/mutate", {
+      action: "cancel_management_admin_payment",
+      sourceType,
+      sourceId,
+      memberId,
+      reason,
+    }),
+  confirmManagementMemberReceipt: (sourceType: "boss" | "siege", sourceId: string) =>
+    postJson<{ ok: boolean; message: string }>("/api/settlements/mutate", {
+      action: "confirm_management_member_receipt",
+      sourceType,
+      sourceId,
+    }),
+  updateManagementPaymentMemo: (
+    sourceType: "boss" | "siege",
+    sourceId: string,
+    memberId: string,
+    memo: string,
+    reason?: string,
+  ) =>
+    postJson<{ ok: boolean; message: string }>("/api/settlements/mutate", {
+      action: "update_management_payment_memo",
+      sourceType,
+      sourceId,
+      memberId,
+      memo,
+      reason,
+    }),
 }
 
 export async function fetchFinanceData(): Promise<{

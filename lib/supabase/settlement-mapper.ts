@@ -204,6 +204,7 @@ export function buildSettlementsFromRows(
   revisions: SettlementRevisionRow[],
   modLogs: SettlementModificationLogRow[],
   memberNames: Map<string, string>,
+  managementPaymentsBySettlement: Map<string, import("@/lib/settlement-management-payment-types").SettlementManagementPayment[]> = new Map(),
 ): Record<string, Settlement> {
   const membersBySettlement = new Map<string, SettlementMemberRow[]>()
   for (const m of members) {
@@ -315,6 +316,7 @@ export function buildSettlementsFromRows(
           ? Number(row.management_fee_percentage_applied)
           : undefined,
       participants,
+      managementPayments: managementPaymentsBySettlement.get(row.id) ?? [],
       revisionSnapshots,
       revisionLogs,
       modificationLogs,
