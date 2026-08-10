@@ -24,6 +24,8 @@
     "phase71:verify-security": "npx tsx scripts/phase71-verify-security.ts",
     "phase8:verify-platform-analytics": "npx tsx scripts/phase8-verify-platform-analytics.ts",
     "phase8:verify-platform-production": "npx tsx scripts/phase8-verify-platform-production.ts",
+    "phase9a:verify-money-rounding": "npx tsx scripts/phase9a-verify-money-rounding.ts",
+    "phase9a:verify-production-schema": "npx tsx scripts/phase9a-verify-production-schema.ts",
     "platform:bootstrap-admin": "npx tsx scripts/bootstrap-platform-admin.ts",
     "production:verify-schema": "npx tsx scripts/production-verify-schema.ts",
     "production:verify-schema:prod": "npx tsx scripts/production-verify-schema.ts --production",

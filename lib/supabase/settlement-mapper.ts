@@ -24,6 +24,10 @@ export type SettlementRow = {
   memo: string
   display_title: string
   display_sub: string
+  rounding_unit: number | null
+  rounding_policy: string | null
+  guild_share_ledger_amount: number | null
+  guild_share_sub_thousand: number | null
   created_by: string | null
   created_at: string
   updated_at: string
@@ -171,6 +175,10 @@ export function settlementToHeaderRow(
     memo: settlement.memo,
     display_title: settlement.displayTitle,
     display_sub: settlement.displaySub,
+    rounding_unit: settlement.roundingUnit ?? null,
+    rounding_policy: settlement.roundingPolicy ?? null,
+    guild_share_ledger_amount: settlement.guildShareLedgerAmount ?? null,
+    guild_share_sub_thousand: settlement.guildShareSubThousand ?? null,
     created_by: createdBy ?? null,
   }
 }
@@ -264,6 +272,16 @@ export function buildSettlementsFromRows(
       memo: row.memo,
       displayTitle: row.display_title,
       displaySub: row.display_sub,
+      roundingUnit: row.rounding_unit != null ? Number(row.rounding_unit) : undefined,
+      roundingPolicy: row.rounding_policy ?? undefined,
+      guildShareLedgerAmount:
+        row.guild_share_ledger_amount != null
+          ? Number(row.guild_share_ledger_amount)
+          : undefined,
+      guildShareSubThousand:
+        row.guild_share_sub_thousand != null
+          ? Number(row.guild_share_sub_thousand)
+          : undefined,
       participants,
       revisionSnapshots,
       revisionLogs,

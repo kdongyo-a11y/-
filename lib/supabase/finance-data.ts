@@ -8,6 +8,7 @@ import { formatYearMonthLabel } from "@/lib/dues-types"
 export type FinanceSettingsRow = {
   guild_id: string
   opening_balance: number
+  rounding_remainder_balance?: number
   updated_at: string
 }
 

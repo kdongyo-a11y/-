@@ -28,6 +28,7 @@ import {
   SettlementParticipantRevisionList,
   SettlementRevisionSummary,
 } from "@/components/admin/settlement-revision-ui"
+import { SettlementRoundingPreview } from "@/components/admin/settlement-rounding-preview"
 import { calcSettlement } from "@/lib/settlement-utils"
 import { formatWon } from "@/lib/guild-data"
 import { type RosterMember } from "@/lib/member-types"
@@ -1103,6 +1104,7 @@ function SettlementForm({
     <div className="mb-4 flex flex-col gap-3">
       <label className="block">
         <span className="text-xs font-medium text-muted-foreground">총 공성 수익</span>
+        <p className="mt-0.5 text-[10px] text-muted-foreground">1,000원 단위</p>
         <input
           type="text"
           inputMode="numeric"
@@ -1113,6 +1115,7 @@ function SettlementForm({
       </label>
       <label className="block">
         <span className="text-xs font-medium text-muted-foreground">혈맹 귀속금</span>
+        <p className="mt-0.5 text-[10px] text-muted-foreground">1,000원 단위</p>
         <input
           type="text"
           inputMode="numeric"
@@ -1130,13 +1133,7 @@ function SettlementForm({
           className="mt-1 w-full rounded-xl border border-border bg-input px-3 py-2.5 text-sm outline-none focus:border-primary"
         />
       </label>
-      <Card className="bg-secondary/50 text-xs text-muted-foreground">
-        <p>분배대상금 {formatWon(preview.distributableAmount)}</p>
-        <p className="mt-1">
-          실제 참여 {participantCount}명 · 1인 {formatWon(preview.perPersonAmount)} · 잔여{" "}
-          {formatWon(preview.remainder)}
-        </p>
-      </Card>
+      <SettlementRoundingPreview preview={preview} participantCount={participantCount} />
       {feedback && <p className="text-center text-xs text-muted-foreground">{feedback}</p>}
       <button
         type="button"

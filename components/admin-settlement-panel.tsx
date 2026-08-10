@@ -12,6 +12,7 @@ import {
 import { calcSettlement } from "@/lib/settlement-utils"
 import { formatWon } from "@/lib/guild-data"
 import { generateDaySlots } from "@/lib/boss-time-slots"
+import { SettlementRoundingPreview } from "@/components/admin/settlement-rounding-preview"
 import { cn } from "@/lib/utils"
 
 type AdminSettlementPanelProps = {
@@ -167,6 +168,7 @@ export function AdminSettlementPanel({ slotId: controlledSlotId, embedded = fals
         <div className="flex flex-col gap-3">
           <label className="block">
             <span className="text-xs font-medium text-muted-foreground">총 수익금</span>
+            <p className="mt-0.5 text-[10px] text-muted-foreground">1,000원 단위</p>
             <input
               type="text"
               inputMode="numeric"
@@ -178,6 +180,7 @@ export function AdminSettlementPanel({ slotId: controlledSlotId, embedded = fals
           </label>
           <label className="block">
             <span className="text-xs font-medium text-muted-foreground">혈맹 귀속금</span>
+            <p className="mt-0.5 text-[10px] text-muted-foreground">1,000원 단위</p>
             <input
               type="text"
               inputMode="numeric"
@@ -188,13 +191,10 @@ export function AdminSettlementPanel({ slotId: controlledSlotId, embedded = fals
             />
           </label>
 
-          <Card className="bg-secondary/50 text-xs text-muted-foreground">
-            <p>분배대상금 {formatWon(preview.distributableAmount)}</p>
-            <p className="mt-1">
-              1인 분배 {formatWon(preview.perPersonAmount)} · 잔여 {formatWon(preview.remainder)} →
-              혈맹귀속 합계 {formatWon(preview.guildShareFinal)}
-            </p>
-          </Card>
+          <SettlementRoundingPreview
+            preview={preview}
+            participantCount={check?.attendees.length ?? 0}
+          />
 
           {feedback && <p className="text-center text-xs text-muted-foreground">{feedback}</p>}
 

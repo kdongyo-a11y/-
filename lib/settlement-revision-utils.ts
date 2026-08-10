@@ -1,4 +1,4 @@
-import { calcSettlement } from "@/lib/settlement-utils"
+import { calcSettlementForRevision } from "@/lib/settlement-utils"
 import type {
   Settlement,
   SettlementMemberAdjustmentLog,
@@ -475,11 +475,7 @@ export function reviseSettlementParticipants(
   attendees: AttendeeInput[],
   reason: string,
 ): Settlement {
-  const calc = calcSettlement({
-    totalRevenue: settlement.totalRevenue,
-    guildShareInput: settlement.guildShareInput,
-    participantCount: attendees.length,
-  })
+  const calc = calcSettlementForRevision(settlement, attendees.length)
 
   const snapshot = snapshotFromSettlement(settlement)
   const memberAdjustments: SettlementMemberAdjustmentLog[] = []
@@ -537,6 +533,8 @@ export function reviseSettlementParticipants(
     distributableAmount: calc.distributableAmount,
     perPersonAmount: calc.perPersonAmount,
     remainder: calc.remainder,
+    guildShareLedgerAmount: calc.guildShareLedgerAmount,
+    guildShareSubThousand: calc.guildShareSubThousand,
     participants,
     revisionSnapshots: [...settlement.revisionSnapshots, snapshot],
     revisionLogs: [...settlement.revisionLogs, revisionLog],

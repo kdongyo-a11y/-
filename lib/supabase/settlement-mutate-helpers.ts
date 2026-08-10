@@ -3,7 +3,7 @@ import { getTodayDateString } from "@/lib/boss-time-slots"
 import { getSlotConfig, formatSlotTime, getSlotLabel } from "@/lib/boss-time-slots"
 import { parseSlotId } from "@/lib/supabase/boss-mapper"
 import { getBossEventBySlotId } from "@/lib/supabase/boss-event-helpers"
-import { calcSettlement } from "@/lib/settlement-utils"
+import { calcSettlement, getGuildShareSubThousand } from "@/lib/settlement-utils"
 import {
   computeOverallStatus,
   createInitialParticipant,
@@ -24,6 +24,7 @@ import {
   persistSettlement,
 } from "@/lib/supabase/settlement-data"
 import { GUILD_SHARE_LEDGER_SUFFIX } from "@/lib/guild-fund-utils"
+import { applyGuildShareRoundingAndLedger } from "@/lib/supabase/money-rounding-data"
 import { upsertLedgerEntry } from "@/lib/supabase/finance-data"
 import { makeSettlementKey, type Settlement, type SettlementSourceType } from "@/lib/settlement-types"
 import { recordUsageEvent } from "@/lib/platform/usage-events"
@@ -36,20 +37,46 @@ async function postSettlementGuildShareLedger(
   admin: SupabaseClient,
   guildId: string,
   settlement: Settlement,
+  prevSettlement?: Pick<Settlement, "guildShareSubThousand" | "guildShareFinal" | "roundingUnit">,
 ) {
-  if (settlement.guildShareFinal <= 0) return
-
   const key = makeSettlementKey(settlement.sourceType, settlement.sourceId)
   const srcType = settlementLedgerSourceType(settlement.sourceType)
   const label = settlement.displayTitle
 
-  await upsertLedgerEntry(admin, guildId, {
-    transactionDate: getTodayDateString(),
-    entryType: "income",
-    sourceType: srcType,
-    sourceId: `${key}${GUILD_SHARE_LEDGER_SUFFIX}`,
-    amount: settlement.guildShareFinal,
-    description: `${label} 혈맹 귀속 ${settlement.guildShareFinal.toLocaleString("ko-KR")}원`,
+  if (settlement.roundingUnit == null || settlement.roundingUnit <= 1) {
+    if (settlement.guildShareFinal <= 0) return
+    await upsertLedgerEntry(admin, guildId, {
+      transactionDate: getTodayDateString(),
+      entryType: "income",
+      sourceType: srcType,
+      sourceId: `${key}${GUILD_SHARE_LEDGER_SUFFIX}`,
+      amount: settlement.guildShareFinal,
+      description: `${label} 혈맹 귀속 ${settlement.guildShareFinal.toLocaleString("ko-KR")}원`,
+    })
+    return
+  }
+
+  const prevSubThousand = prevSettlement
+    ? (prevSettlement.guildShareSubThousand ??
+      getGuildShareSubThousand(prevSettlement.guildShareFinal))
+    : 0
+  const nextSubThousand =
+    settlement.guildShareSubThousand ?? getGuildShareSubThousand(settlement.guildShareFinal)
+  const ledgerAmount =
+    settlement.guildShareLedgerAmount ??
+    settlement.guildShareFinal - nextSubThousand
+
+  if (ledgerAmount <= 0 && nextSubThousand <= 0 && prevSubThousand <= 0) {
+    return
+  }
+
+  await applyGuildShareRoundingAndLedger(admin, guildId, {
+    settlementLedgerSourceType: srcType,
+    settlementLedgerSourceId: `${key}${GUILD_SHARE_LEDGER_SUFFIX}`,
+    label,
+    prevSubThousand,
+    nextSubThousand,
+    guildShareLedgerAmount: Math.max(0, ledgerAmount),
   })
 }
 
@@ -141,12 +168,16 @@ export async function createBossSettlementOnServer(
     createdAt: Date.now(),
     revision: 1,
     overallStatus: "active",
-    totalRevenue,
-    guildShareInput,
+    totalRevenue: calc.totalRevenue,
+    guildShareInput: calc.guildShareInput,
     guildShareFinal: calc.guildShareFinal,
     distributableAmount: calc.distributableAmount,
     perPersonAmount: calc.perPersonAmount,
     remainder: calc.remainder,
+    roundingUnit: calc.roundingUnit,
+    roundingPolicy: calc.roundingPolicy,
+    guildShareLedgerAmount: calc.guildShareLedgerAmount,
+    guildShareSubThousand: calc.guildShareSubThousand,
     memo: "",
     displayTitle: `${time} ${label}`,
     displaySub: "",
@@ -238,12 +269,16 @@ export async function createSiegeSettlementOnServer(
     createdAt: Date.now(),
     revision: 1,
     overallStatus: "active",
-    totalRevenue,
-    guildShareInput,
+    totalRevenue: calc.totalRevenue,
+    guildShareInput: calc.guildShareInput,
     guildShareFinal: calc.guildShareFinal,
     distributableAmount: calc.distributableAmount,
     perPersonAmount: calc.perPersonAmount,
     remainder: calc.remainder,
+    roundingUnit: calc.roundingUnit,
+    roundingPolicy: calc.roundingPolicy,
+    guildShareLedgerAmount: calc.guildShareLedgerAmount,
+    guildShareSubThousand: calc.guildShareSubThousand,
     memo: memo.trim(),
     displayTitle,
     displaySub,
@@ -337,7 +372,7 @@ export async function reviseSettlementOnServer(
         : undefined,
   })
 
-  await postSettlementGuildShareLedger(admin, guildId, revised)
+  await postSettlementGuildShareLedger(admin, guildId, revised, prev)
 
   return {
     ok: true,

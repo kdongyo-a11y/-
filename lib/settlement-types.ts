@@ -111,6 +111,11 @@ export type Settlement = {
   memo: string
   displayTitle: string
   displaySub: string
+  /** Phase 9a snapshot — null/undefined = legacy settlement */
+  roundingUnit?: number
+  roundingPolicy?: string
+  guildShareLedgerAmount?: number
+  guildShareSubThousand?: number
   participants: SettlementParticipant[]
   revisionSnapshots: SettlementRevisionSnapshot[]
   revisionLogs: SettlementRevisionLog[]
