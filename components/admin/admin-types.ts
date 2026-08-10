@@ -5,6 +5,7 @@ export type AdminSection =
   | "members"
   | "finance"
   | "contribution"
+  | "notices"
   | "initialData"
   | "dataManagement"
 

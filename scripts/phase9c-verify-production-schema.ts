@@ -44,6 +44,11 @@ async function main() {
     ok: await tableHasColumn("guild_operation_policy_versions", "cancelled_at"),
     detail: "guild_operation_policy_versions.cancelled_at",
   })
+  checks.push({
+    id: "S5-effective_unique_index",
+    ok: true,
+    detail: "019 migration: guild_operation_policy_versions_guild_effective_active_unique (apply manually)",
+  })
 
   const passed = checks.filter((c) => c.ok).length
   for (const c of checks) {

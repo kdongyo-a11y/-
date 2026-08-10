@@ -2,6 +2,7 @@ import type {
   GuildOperationSettings,
   OperationPolicySnapshotPayload,
   PolicyAmountMode,
+  PolicyVersionStatus,
 } from "@/lib/operation-settings-types"
 import { OPERATION_POLICY_SCHEMA_VERSION } from "@/lib/operation-settings-types"
 
@@ -118,20 +119,49 @@ export function getCurrentPolicyVersion(
   return selectPolicyVersionForOccurredAt(versions, nowIso)
 }
 
-/** 가장 가까운 미래 예약 정책 (cancelled 제외) */
-export function getNextScheduledPolicyVersion(
+/** 미래 예약 정책 전체 — effective_from ASC, cancelled 제외 */
+export function getScheduledPolicyVersions(
   versions: GuildOperationPolicyVersion[],
   nowIso = new Date().toISOString(),
-): GuildOperationPolicyVersion | null {
+): GuildOperationPolicyVersion[] {
   const nowMs = new Date(nowIso).getTime()
-  const future = versions
+  return versions
     .filter((v) => !v.cancelledAt && new Date(v.effectiveFrom).getTime() > nowMs)
     .sort(
       (a, b) =>
         new Date(a.effectiveFrom).getTime() - new Date(b.effectiveFrom).getTime() ||
         a.version - b.version,
     )
-  return future[0] ?? null
+}
+
+export function getNextScheduledPolicyVersion(
+  versions: GuildOperationPolicyVersion[],
+  nowIso = new Date().toISOString(),
+): GuildOperationPolicyVersion | null {
+  return getScheduledPolicyVersions(versions, nowIso)[0] ?? null
+}
+
+export function computePolicyVersionStatus(
+  version: GuildOperationPolicyVersion,
+  nowIso: string,
+  currentVersion: GuildOperationPolicyVersion | null,
+): PolicyVersionStatus {
+  if (version.cancelledAt) return "cancelled"
+  if (currentVersion?.id === version.id) return "current"
+  const nowMs = new Date(nowIso).getTime()
+  if (new Date(version.effectiveFrom).getTime() > nowMs) return "scheduled"
+  return "past"
+}
+
+/** 활성(미취소) 정책 중 동일 effective_from 존재 여부 */
+export function hasDuplicateActiveEffectiveFrom(
+  versions: GuildOperationPolicyVersion[],
+  effectiveFromIso: string,
+): boolean {
+  const targetMs = new Date(effectiveFromIso).getTime()
+  return versions.some(
+    (v) => !v.cancelledAt && new Date(v.effectiveFrom).getTime() === targetMs,
+  )
 }
 
 export function isScheduledPolicyVersion(

@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo } from "react"
-import { ChevronRight, Clock, Shield, Users, Coins, Trophy, Database, FolderOpen } from "lucide-react"
+import { ChevronRight, Clock, Shield, Users, Coins, Trophy, Database, FolderOpen, Megaphone } from "lucide-react"
 import { Card, SectionTitle } from "@/components/ui-bits"
 import type { AdminNavState } from "@/components/admin/admin-types"
 import { useAuth } from "@/components/auth-context"
@@ -16,7 +16,7 @@ import {
   computeBossProcessStatus,
   summarizeBossStatuses,
 } from "@/lib/boss-admin-status"
-import { bossDateNav, financeTabNav, initialDataNav, dataManagementNav } from "@/components/admin/admin-nav-helpers"
+import { bossDateNav, financeTabNav, initialDataNav, dataManagementNav, noticesNav } from "@/components/admin/admin-nav-helpers"
 import { useContributionPeriod, getThisMonthPeriod } from "@/components/use-contribution"
 
 type Props = {
@@ -77,6 +77,13 @@ export function AdminHomeView({ onNavigate }: Props) {
       </p>
 
       <div className="flex flex-col gap-3">
+        <CategoryCard
+          icon={<Megaphone className="h-4 w-4" />}
+          title="공지사항"
+          lines={["혈맹원 공지 작성·예약 게시·보관"]}
+          onOpen={() => onNavigate(noticesNav())}
+        />
+
         <CategoryCard
           icon={<Clock className="h-4 w-4" />}
           title="보스타임 관리"

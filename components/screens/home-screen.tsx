@@ -1,10 +1,15 @@
 "use client"
 
+import { useState } from "react"
 import { Shield } from "lucide-react"
 import { Card, Badge } from "@/components/ui-bits"
+import { HomeNoticesSection } from "@/components/home-notices-section"
 import { HomePendingSection } from "@/components/home-pending-section"
 import { HomeUpcomingBossSection } from "@/components/home-upcoming-boss-section"
+import { HomeScheduledPolicySection } from "@/components/home-scheduled-policy-section"
 import { HomeMyStatsSection } from "@/components/home-my-stats-section"
+import { NoticesListScreen } from "@/components/notices-list-screen"
+import { NoticeDetailScreen } from "@/components/notice-detail-screen"
 import { useParticipation } from "@/components/participation-context"
 import { useSiege } from "@/components/siege-context"
 import { useDues } from "@/components/dues-context"
@@ -16,7 +21,14 @@ import { formatSiegeTimeRange } from "@/lib/siege-utils"
 import { formatMemberProfile } from "@/lib/member-utils"
 import { cn } from "@/lib/utils"
 
+type HomeNav =
+  | { view: "main" }
+  | { view: "notices" }
+  | { view: "notice-detail"; noticeId: string }
+
 export function HomeScreen() {
+  const [homeNav, setHomeNav] = useState<HomeNav>({ view: "main" })
+
   const { getThisWeekSiege, getActiveSurveySiege, getMemberSurveyStatus, submitSurveyResponse } =
     useSiege()
   const { isPaid, bills, activeBillId } = useDues()
@@ -54,6 +66,24 @@ export function HomeScreen() {
     ? `${activeBill.title.replace(/ 혈비$/, "")}`
     : undefined
 
+  if (homeNav.view === "notices") {
+    return (
+      <NoticesListScreen
+        onBack={() => setHomeNav({ view: "main" })}
+        onOpenNotice={(noticeId) => setHomeNav({ view: "notice-detail", noticeId })}
+      />
+    )
+  }
+
+  if (homeNav.view === "notice-detail") {
+    return (
+      <NoticeDetailScreen
+        noticeId={homeNav.noticeId}
+        onBack={() => setHomeNav({ view: "notices" })}
+      />
+    )
+  }
+
   return (
     <div>
       <div className="mb-4">
@@ -65,6 +95,13 @@ export function HomeScreen() {
           </span>
         </p>
       </div>
+
+      <HomeNoticesSection
+        onShowAll={() => setHomeNav({ view: "notices" })}
+        onOpenNotice={(noticeId) => setHomeNav({ view: "notice-detail", noticeId })}
+      />
+
+      <HomeScheduledPolicySection />
 
       <HomePendingSection />
 

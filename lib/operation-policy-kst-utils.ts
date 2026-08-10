@@ -46,3 +46,10 @@ export function formatKstDateTimeLabel(iso: string): string {
   const { date, time } = isoToKstParts(iso)
   return `${date} ${time} (KST)`
 }
+
+/** 홈 요약용 — "9월 1일 00:00" */
+export function formatKstDateShortLabel(iso: string): string {
+  const { date, time } = isoToKstParts(iso)
+  const [, month, day] = date.split("-").map(Number)
+  return `${month}월 ${day}일 ${time}`
+}

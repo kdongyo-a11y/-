@@ -30,6 +30,8 @@
     "phase9b:verify-production-schema": "npx tsx scripts/phase9b-verify-production-schema.ts",
     "phase9c:verify-operation-policy-versions": "npx tsx scripts/phase9c-verify-operation-policy-versions.ts",
     "phase9c:verify-production-schema": "npx tsx scripts/phase9c-verify-production-schema.ts",
+    "phase9c:verify-guild-notices": "npx tsx scripts/phase9c-verify-guild-notices.ts",
+    "phase9c:verify-notices-production-schema": "npx tsx scripts/phase9c-verify-notices-production-schema.ts",
     "platform:bootstrap-admin": "npx tsx scripts/bootstrap-platform-admin.ts",
     "production:verify-schema": "npx tsx scripts/production-verify-schema.ts",
     "production:verify-schema:prod": "npx tsx scripts/production-verify-schema.ts --production",

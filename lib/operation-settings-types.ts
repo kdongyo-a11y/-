@@ -87,6 +87,8 @@ export type OperationPolicySnapshotPayload = {
   /** 향후: payout, contribution, level weight 등 */
 }
 
+export type PolicyVersionStatus = "current" | "scheduled" | "past" | "cancelled"
+
 export type GuildOperationPolicyVersionSummary = {
   id: string
   version: number
@@ -95,12 +97,17 @@ export type GuildOperationPolicyVersionSummary = {
   changeReason: string
   cancelledAt: string | null
   policySnapshot: OperationPolicySnapshotPayload
+  status: PolicyVersionStatus
 }
 
 export type GuildOperationPolicyView = {
   currentPolicy: GuildOperationPolicyVersionSummary | null
+  /** 가장 가까운 미래 예약 (하위 호환) */
   nextScheduledPolicy: GuildOperationPolicyVersionSummary | null
+  /** 미래 예약 전체 — effective_from ASC, cancelled 제외 */
+  scheduledPolicies: GuildOperationPolicyVersionSummary[]
   /** 편집 폼 prefill — 현재 적용 정책 기준 */
   settings: GuildOperationSettings
+  /** 관리자 이력 — cancelled 포함 */
   versions: GuildOperationPolicyVersionSummary[]
 }

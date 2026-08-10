@@ -9,6 +9,7 @@ import type {
   ActiveMemberOption,
   GuildOperationPolicyView,
   PolicyAmountMode,
+  PolicyVersionStatus,
 } from "@/lib/operation-settings-types"
 import {
   POLICY_AMOUNT_MODE_LABELS,
@@ -26,6 +27,13 @@ type AllocationDraft = {
   memberId: string
   nickname: string
   ratioBp: string
+}
+
+const POLICY_STATUS_LABELS: Record<PolicyVersionStatus, string> = {
+  current: "현재 적용",
+  scheduled: "예약",
+  past: "과거",
+  cancelled: "취소됨",
 }
 
 function policyFinanceLabel(view: GuildOperationPolicyView["currentPolicy"]): string {
@@ -188,25 +196,28 @@ export function AdminOperationSettingsView({ onNavigate }: Props) {
             <p className="text-muted-foreground">없음</p>
           )}
         </Card>
-        <Card className="space-y-1 p-4 text-sm">
-          <p className="text-xs font-medium text-muted-foreground">다음 예약 정책</p>
-          {policyView?.nextScheduledPolicy ? (
-            <>
-              <p className="font-semibold">{policyFinanceLabel(policyView.nextScheduledPolicy)}</p>
-              <p className="text-xs text-muted-foreground">
-                v{policyView.nextScheduledPolicy.version} · 시행{" "}
-                {formatKstDateTimeLabel(policyView.nextScheduledPolicy.effectiveFrom)}
-              </p>
-              <button
-                type="button"
-                onClick={() => void handleCancelScheduled(policyView.nextScheduledPolicy!.id)}
-                className="mt-2 text-xs text-destructive"
-              >
-                예약 취소
-              </button>
-            </>
-          ) : (
+        <Card className="space-y-2 p-4 text-sm">
+          <p className="text-xs font-medium text-muted-foreground">예약 정책</p>
+          {(policyView?.scheduledPolicies ?? []).length === 0 ? (
             <p className="text-muted-foreground">없음</p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {(policyView?.scheduledPolicies ?? []).map((sp) => (
+                <div key={sp.id} className="rounded-lg border border-border/60 p-2">
+                  <p className="font-semibold">{policyFinanceLabel(sp)}</p>
+                  <p className="text-xs text-muted-foreground">
+                    v{sp.version} · 시행 {formatKstDateTimeLabel(sp.effectiveFrom)}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => void handleCancelScheduled(sp.id)}
+                    className="mt-1 text-xs text-destructive"
+                  >
+                    예약 취소
+                  </button>
+                </div>
+              ))}
+            </div>
           )}
         </Card>
       </div>
@@ -369,15 +380,28 @@ export function AdminOperationSettingsView({ onNavigate }: Props) {
         )}
         {(policyView?.versions ?? []).map((v) => (
           <Card key={v.id} className="py-3 text-xs">
-            <p className="font-medium">
-              v{v.version} · {policyFinanceLabel(v)}
-              {v.cancelledAt ? " (취소됨)" : ""}
-            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="font-medium">
+                v{v.version} · {policyFinanceLabel(v)}
+              </p>
+              <span className="rounded bg-secondary px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                {POLICY_STATUS_LABELS[v.status]}
+              </span>
+            </div>
             <p className="mt-1 text-muted-foreground">{v.changeReason}</p>
             <p className="mt-1 text-[10px] text-muted-foreground">
               시행 {formatKstDateTimeLabel(v.effectiveFrom)} · 등록{" "}
               {formatKstDateTimeLabel(v.createdAt)}
             </p>
+            {v.status === "scheduled" && (
+              <button
+                type="button"
+                onClick={() => void handleCancelScheduled(v.id)}
+                className="mt-2 text-xs text-destructive"
+              >
+                예약 취소
+              </button>
+            )}
           </Card>
         ))}
       </div>

@@ -44,6 +44,10 @@ export function dataManagementTabNav(tab: NonNullable<AdminNavState["dataManagem
   return { section: "dataManagement", dataManagementTab: tab }
 }
 
+export function noticesNav(): AdminNavState {
+  return { section: "notices" }
+}
+
 export function shiftDate(dateStr: string, deltaDays: number): string {
   const d = new Date(dateStr + "T12:00:00")
   d.setDate(d.getDate() + deltaDays)

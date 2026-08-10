@@ -14,6 +14,7 @@ import { AdminOpeningBalanceView } from "@/components/admin/admin-opening-balanc
 import { AdminBulkMembersView } from "@/components/admin/admin-bulk-members-view"
 import { AdminContributionSettingsView } from "@/components/admin/admin-contribution-settings-view"
 import { AdminOperationSettingsView } from "@/components/admin/admin-operation-settings-view"
+import { AdminNoticesView } from "@/components/admin/admin-notices-view"
 import { AdminGuildProfileView } from "@/components/admin/admin-guild-profile-view"
 import { AdminDataManagementView } from "@/components/admin/admin-data-management-view"
 import { AdminDataDashboardView } from "@/components/admin/admin-data-dashboard-view"
@@ -78,6 +79,9 @@ export function AdminSectionContent({ nav, onNavigate }: Props) {
           onNavigate={onNavigate}
         />
       )
+
+    case "notices":
+      return <AdminNoticesView onNavigate={onNavigate} />
 
     case "initialData": {
       const tab = nav.initialDataTab

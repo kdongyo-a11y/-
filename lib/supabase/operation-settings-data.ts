@@ -4,6 +4,7 @@ import type {
   GuildOperationPolicyView,
   GuildOperationSettings,
   PolicyAmountMode,
+  PolicyVersionStatus,
 } from "@/lib/operation-settings-types"
 import {
   DEFAULT_GUILD_OPERATION_SETTINGS,
@@ -14,13 +15,21 @@ import { isEffectiveFromAllowedForNewPolicy } from "@/lib/operation-policy-kst-u
 import {
   buildPolicySnapshotV1,
   canCancelPolicyVersion,
+  computePolicyVersionStatus,
   financeSettingsFromSnapshot,
   getCurrentPolicyVersion,
   getNextScheduledPolicyVersion,
+  getScheduledPolicyVersions,
+  hasDuplicateActiveEffectiveFrom,
   parsePolicySnapshotPayload,
   selectPolicyVersionForOccurredAt,
   type GuildOperationPolicyVersion,
 } from "@/lib/operation-policy-version-utils"
+import {
+  toMemberPolicySnapshotPublic,
+  buildFinanceChangeSummaryLines,
+  type MemberOperationPolicyPublicView,
+} from "@/lib/operation-policy-display-utils"
 import { requireActiveMembersInActorGuild } from "@/lib/supabase/guild-scope-helpers"
 
 type VersionRow = {
@@ -55,7 +64,10 @@ function mapVersionRow(row: VersionRow): GuildOperationPolicyVersion | null {
   }
 }
 
-function toSummary(v: GuildOperationPolicyVersion): GuildOperationPolicyView["currentPolicy"] {
+function toSummary(
+  v: GuildOperationPolicyVersion,
+  status: PolicyVersionStatus,
+): GuildOperationPolicyView["currentPolicy"] {
   return {
     id: v.id,
     version: v.version,
@@ -64,6 +76,7 @@ function toSummary(v: GuildOperationPolicyVersion): GuildOperationPolicyView["cu
     changeReason: v.changeReason,
     cancelledAt: v.cancelledAt,
     policySnapshot: v.policySnapshot,
+    status,
   }
 }
 
@@ -124,7 +137,8 @@ export async function fetchGuildOperationPolicyView(
   const nameById = new Map(members.map((m) => [m.id, m.nickname]))
   const nowIso = new Date().toISOString()
   const current = getCurrentPolicyVersion(versions, nowIso)
-  const nextScheduled = getNextScheduledPolicyVersion(versions, nowIso)
+  const scheduledRaw = getScheduledPolicyVersions(versions, nowIso)
+  const nextScheduled = scheduledRaw[0] ?? null
   const atOccurred = occurredAtIso
     ? selectPolicyVersionForOccurredAt(versions, occurredAtIso)
     : current
@@ -133,11 +147,59 @@ export async function fetchGuildOperationPolicyView(
     ? financeSettingsFromSnapshot(atOccurred.policySnapshot, nameById)
     : { ...DEFAULT_GUILD_OPERATION_SETTINGS, updatedAt: null }
 
+  const withStatus = (v: GuildOperationPolicyVersion) =>
+    toSummary(v, computePolicyVersionStatus(v, nowIso, current))
+
   return {
-    currentPolicy: current ? toSummary(current) : null,
-    nextScheduledPolicy: nextScheduled ? toSummary(nextScheduled) : null,
+    currentPolicy: current ? withStatus(current) : null,
+    nextScheduledPolicy: nextScheduled ? withStatus(nextScheduled) : null,
+    scheduledPolicies: scheduledRaw.map(withStatus),
     settings,
-    versions: versions.map(toSummary).filter((v): v is NonNullable<typeof v> => v != null),
+    versions: versions.map(withStatus).filter((v): v is NonNullable<typeof v> => v != null),
+  }
+}
+
+export async function fetchMemberOperationPolicyPublicView(
+  admin: SupabaseClient,
+  guildId: string,
+): Promise<MemberOperationPolicyPublicView> {
+  const [versions, members] = await Promise.all([
+    fetchGuildOperationPolicyVersions(admin, guildId),
+    fetchActiveGuildMembers(admin, guildId),
+  ])
+  const nameById = new Map(members.map((m) => [m.id, m.nickname]))
+  const nowIso = new Date().toISOString()
+  const current = getCurrentPolicyVersion(versions, nowIso)
+  const scheduledRaw = getScheduledPolicyVersions(versions, nowIso)
+
+  const toPublic = (v: GuildOperationPolicyVersion) =>
+    toMemberPolicySnapshotPublic(
+      {
+        effectiveFrom: v.effectiveFrom,
+        changeReason: v.changeReason,
+        policySnapshot: v.policySnapshot,
+      },
+      nameById,
+    )
+
+  const scheduledPolicies = scheduledRaw.map(toPublic)
+  const nextScheduledPolicy = scheduledPolicies[0] ?? null
+  const nextScheduledChangeLines =
+    nextScheduledPolicy && current
+      ? buildFinanceChangeSummaryLines(
+          current.policySnapshot.finance,
+          scheduledRaw[0]!.policySnapshot.finance,
+        )
+      : nextScheduledPolicy
+        ? buildFinanceChangeSummaryLines(null, scheduledRaw[0]!.policySnapshot.finance)
+        : []
+
+  return {
+    currentPolicy: current ? toPublic(current) : null,
+    nextScheduledPolicy,
+    nextScheduledChangeLines,
+    scheduledPolicies,
+    additionalScheduledCount: Math.max(0, scheduledPolicies.length - 1),
   }
 }
 
@@ -207,6 +269,15 @@ export async function createGuildOperationPolicyVersionOnServer(
     }
   }
 
+  const existingVersions = await fetchGuildOperationPolicyVersions(admin, guildId)
+  if (hasDuplicateActiveEffectiveFrom(existingVersions, input.effectiveFromIso)) {
+    return {
+      ok: false,
+      message:
+        "동일한 시행 시각의 예약 정책이 이미 존재합니다. 기존 예약을 취소한 후 다시 등록해주세요.",
+    }
+  }
+
   const { data: maxRow } = await admin
     .from("guild_operation_policy_versions")
     .select("version")
@@ -238,6 +309,13 @@ export async function createGuildOperationPolicyVersionOnServer(
     .single()
 
   if (error || !data) {
+    if (error?.code === "23505") {
+      return {
+        ok: false,
+        message:
+          "동일한 시행 시각의 예약 정책이 이미 존재합니다. 기존 예약을 취소한 후 다시 등록해주세요.",
+      }
+    }
     console.error("[createGuildOperationPolicyVersionOnServer]", error)
     return { ok: false, message: "운영 정책 version 저장에 실패했습니다." }
   }

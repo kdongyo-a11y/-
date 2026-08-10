@@ -5,6 +5,8 @@ import { AppShell, type TabKey } from "@/components/app-shell"
 import { AuthProvider, useAuth } from "@/components/auth-context"
 import { NavigationProvider } from "@/components/navigation-context"
 import { ContributionSettingsProvider } from "@/components/contribution-settings-context"
+import { OperationPolicyProvider } from "@/components/operation-policy-context"
+import { NoticesProvider } from "@/components/notices-context"
 import { GuildLedgerProvider } from "@/components/guild-ledger-context"
 import { DuesProvider } from "@/components/dues-context"
 import { ParticipationProvider } from "@/components/participation-context"
@@ -120,13 +122,17 @@ function AuthenticatedApp() {
     <GuildLedgerProvider>
       <DuesProvider>
         <ContributionSettingsProvider>
-          <ParticipationProvider>
-            <SiegeProvider>
-              <SettlementProvider>
-                <PageContent />
-              </SettlementProvider>
-            </SiegeProvider>
-          </ParticipationProvider>
+          <OperationPolicyProvider>
+            <NoticesProvider>
+              <ParticipationProvider>
+                <SiegeProvider>
+                  <SettlementProvider>
+                    <PageContent />
+                  </SettlementProvider>
+                </SiegeProvider>
+              </ParticipationProvider>
+            </NoticesProvider>
+          </OperationPolicyProvider>
         </ContributionSettingsProvider>
       </DuesProvider>
     </GuildLedgerProvider>
