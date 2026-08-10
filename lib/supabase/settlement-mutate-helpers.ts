@@ -26,6 +26,7 @@ import {
   getSettlementByKey,
   getSettlementDbId,
   persistSettlement,
+  rollbackSettlementCreate,
 } from "@/lib/supabase/settlement-data"
 import {
   appendManagementPaymentLog,
@@ -48,6 +49,8 @@ import { makeSettlementKey, type Settlement, type SettlementSourceType } from "@
 import { recordUsageEvent } from "@/lib/platform/usage-events"
 import { sumConfirmedReceiptsForSettlement } from "@/lib/supabase/settlement-revenue-receipt-data"
 import { validateRevisionAgainstReceipts } from "@/lib/settlement-revenue-receipt-utils"
+import { persistSettlementRevenueItemsOnCreate } from "@/lib/supabase/settlement-revenue-item-data"
+import type { SettlementRevenueItemInput } from "@/lib/settlement-revenue-item-types"
 
 function settlementLedgerSourceType(sourceType: SettlementSourceType): string {
   return sourceType === "boss" ? "boss_settlement" : "siege_settlement"
@@ -243,6 +246,7 @@ export async function createBossSettlementOnServer(
   totalRevenue: number,
   guildShareInput: number,
   managementFeeManualInput = 0,
+  revenueItems?: SettlementRevenueItemInput[],
 ): Promise<{ ok: boolean; message: string }> {
   const existing = await getSettlementByKey(admin, guildId, "boss", slotId)
   if (existing) return { ok: false, message: "이미 정산이 생성되었습니다." }
@@ -298,8 +302,29 @@ export async function createBossSettlementOnServer(
 
   await persistSettlement(admin, settlement, actorId, guildId)
   const bossSettlementId = await getSettlementDbId(admin, guildId, "boss", slotId)
+  const hasRevenueItems = (revenueItems?.length ?? 0) > 0
+
   if (bossSettlementId) {
     await createManagementPaymentsOnSettlementCreate(admin, guildId, bossSettlementId, settlement)
+    if (hasRevenueItems) {
+      try {
+        const itemsResult = await persistSettlementRevenueItemsOnCreate(
+          admin,
+          guildId,
+          bossSettlementId,
+          actorId,
+          totalRevenue,
+          revenueItems,
+        )
+        if (!itemsResult.ok) {
+          await rollbackSettlementCreate(admin, guildId, bossSettlementId)
+          return itemsResult
+        }
+      } catch (itemsError) {
+        await rollbackSettlementCreate(admin, guildId, bossSettlementId)
+        throw itemsError
+      }
+    }
   }
   await postSettlementGuildShareLedger(admin, guildId, settlement)
 
@@ -325,6 +350,7 @@ export async function createSiegeSettlementOnServer(
   guildShareInput: number,
   memo = "",
   managementFeeManualInput = 0,
+  revenueItems?: SettlementRevenueItemInput[],
 ): Promise<{ ok: boolean; message: string }> {
   const existing = await getSettlementByKey(admin, guildId, "siege", siegeId)
   if (existing) return { ok: false, message: "이미 공성 정산이 생성되었습니다." }
@@ -400,8 +426,29 @@ export async function createSiegeSettlementOnServer(
 
   await persistSettlement(admin, settlement, actorId, guildId)
   const siegeSettlementId = await getSettlementDbId(admin, guildId, "siege", siegeId)
+  const hasRevenueItems = (revenueItems?.length ?? 0) > 0
+
   if (siegeSettlementId) {
     await createManagementPaymentsOnSettlementCreate(admin, guildId, siegeSettlementId, settlement)
+    if (hasRevenueItems) {
+      try {
+        const itemsResult = await persistSettlementRevenueItemsOnCreate(
+          admin,
+          guildId,
+          siegeSettlementId,
+          actorId,
+          totalRevenue,
+          revenueItems,
+        )
+        if (!itemsResult.ok) {
+          await rollbackSettlementCreate(admin, guildId, siegeSettlementId)
+          return itemsResult
+        }
+      } catch (itemsError) {
+        await rollbackSettlementCreate(admin, guildId, siegeSettlementId)
+        throw itemsError
+      }
+    }
   }
   await postSettlementGuildShareLedger(admin, guildId, settlement)
 

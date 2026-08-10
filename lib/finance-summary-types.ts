@@ -1,5 +1,50 @@
 import type { GuildCashCheckpoint } from "@/lib/guild-cash-types"
+import type { SettlementRevenueItem } from "@/lib/settlement-revenue-item-types"
+import type { SettlementRevenueReceipt } from "@/lib/settlement-revenue-receipt-types"
 
+export type FinanceWorkItemKind =
+  | "revenue_receivable"
+  | "dues_receivable"
+  | "return_receivable"
+  | "participant_payable"
+  | "management_payable"
+  | "additional_payable"
+
+export type FinanceWorkQueueSort = "remaining_desc" | "newest" | "oldest" | "kind"
+
+export type FinanceWorkItem = {
+  id: string
+  kind: FinanceWorkItemKind
+  occurredAt: string
+  totalAmount: number
+  remainingAmount: number
+  statusLabel: string
+  title: string
+  subtitle: string
+  description: string
+  settlementDbId?: string
+  sourceType?: "boss" | "siege"
+  sourceId?: string
+  memberId?: string
+  billId?: string
+  duesMonth?: string
+}
+
+export type SettlementRevenueDetail = {
+  settlementDbId: string
+  sourceType: "boss" | "siege"
+  sourceId: string
+  displayTitle: string
+  displaySub: string
+  occurredAt: string
+  totalIncome: number
+  receivedAmount: number
+  receivableAmount: number
+  items: SettlementRevenueItem[]
+  receipts: SettlementRevenueReceipt[]
+}
+
+/** @deprecated use receivableQueue — kept for transition */
 export type FinanceReceivableLine = {
   id: string
   label: string
@@ -45,8 +90,10 @@ export type FinanceSummary = {
     additional: number
     management: number
   }
+  receivableQueue: FinanceWorkItem[]
+  payableQueue: FinanceWorkItem[]
+  revenueDetails: Record<string, SettlementRevenueDetail>
   drilldown: FinanceSummaryDrilldown
-  /** payables > cashBalance */
   payablesExceedCash: boolean
 }
 
@@ -59,6 +106,8 @@ export type FinanceSummarySettlementInput = {
   displaySub: string
   totalIncome: number
   receivedAmount: number
+  revenueItems: SettlementRevenueItem[]
+  receipts: SettlementRevenueReceipt[]
   participants: Array<{
     memberId: string
     name: string

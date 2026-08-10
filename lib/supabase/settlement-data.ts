@@ -251,3 +251,16 @@ export async function getSettlementByIdForGuild(
   if (error || !data) return null
   return data
 }
+
+/** Compensating rollback when settlement create + revenue items must be atomic (Postgres RPC). */
+export async function rollbackSettlementCreate(
+  admin: SupabaseClient,
+  guildId: string,
+  settlementId: string,
+): Promise<void> {
+  const { error } = await admin.rpc("rollback_settlement_create", {
+    p_guild_id: guildId,
+    p_settlement_id: settlementId,
+  })
+  if (error) throw error
+}

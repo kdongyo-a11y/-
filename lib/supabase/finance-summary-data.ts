@@ -18,6 +18,9 @@ import {
 } from "@/lib/supabase/guild-cash-data"
 import type { SettlementMemberRow, SettlementRow } from "@/lib/supabase/settlement-mapper"
 import { fetchSettlementRevenueReceipts } from "@/lib/supabase/settlement-revenue-receipt-data"
+import { fetchSettlementRevenueItems } from "@/lib/supabase/settlement-revenue-item-data"
+import type { SettlementRevenueReceipt } from "@/lib/settlement-revenue-receipt-types"
+import type { SettlementRevenueItem } from "@/lib/settlement-revenue-item-types"
 
 function ledgerEntryToGuildFundEntry(e: LedgerEntry): GuildFundLedgerEntry {
   return {
@@ -39,6 +42,7 @@ export async function fetchFinanceSummaryForGuild(
     settingsRes,
     movements,
     receipts,
+    revenueItems,
     settlementsRes,
     mgmtRes,
     duesRes,
@@ -48,6 +52,7 @@ export async function fetchFinanceSummaryForGuild(
     supabase.from("guild_finance_settings").select("rounding_remainder_balance").maybeSingle(),
     fetchGuildCashMovements(supabase, guildId),
     fetchSettlementRevenueReceipts(supabase, guildId),
+    fetchSettlementRevenueItems(supabase, guildId),
     supabase.from("settlements").select("*").eq("guild_id", guildId),
     supabase.from("settlement_management_payments").select("*").eq("guild_id", guildId),
     supabase.from("dues").select("*").eq("guild_id", guildId),
@@ -108,6 +113,22 @@ export async function fetchFinanceSummaryForGuild(
     (memberNamesRes.data ?? []).map((m: { id: string; nickname: string }) => [m.id, m.nickname]),
   )
 
+  const itemsBySettlement = new Map<string, SettlementRevenueItem[]>()
+  for (const item of revenueItems) {
+    if (!settlementIds.has(item.settlementId)) continue
+    const list = itemsBySettlement.get(item.settlementId) ?? []
+    list.push(item)
+    itemsBySettlement.set(item.settlementId, list)
+  }
+
+  const receiptsBySettlement = new Map<string, SettlementRevenueReceipt[]>()
+  for (const r of receipts) {
+    if (!settlementIds.has(r.settlementId)) continue
+    const list = receiptsBySettlement.get(r.settlementId) ?? []
+    list.push(r)
+    receiptsBySettlement.set(r.settlementId, list)
+  }
+
   const settlements = settlementRows.map((s) => {
     const memberRows = membersBySettlement.get(s.id) ?? []
     const mgmtRows = mgmtBySettlement.get(s.id) ?? []
@@ -120,6 +141,8 @@ export async function fetchFinanceSummaryForGuild(
       displaySub: s.display_sub,
       totalIncome: Number(s.total_income),
       receivedAmount: receivedAmountForSettlement(s.id, receipts),
+      revenueItems: itemsBySettlement.get(s.id) ?? [],
+      receipts: receiptsBySettlement.get(s.id) ?? [],
       participants: memberRows.map((m) => ({
         memberId: m.member_id,
         name: memberNames.get(m.member_id) ?? "혈원",

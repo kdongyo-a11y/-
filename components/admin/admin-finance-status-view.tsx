@@ -1,15 +1,32 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { AlertTriangle, ChevronDown, ChevronUp } from "lucide-react"
 import { Badge, Card, SectionTitle, StatCard } from "@/components/ui-bits"
 import { AdminBreadcrumb } from "@/components/admin/admin-breadcrumb"
 import type { AdminNavState } from "@/components/admin/admin-types"
 import { financeTabNav, initialDataTabNav } from "@/components/admin/admin-nav-helpers"
 import { formatWon, formatWonShort } from "@/lib/guild-data"
-import type { FinanceSummary } from "@/lib/finance-summary-types"
+import type {
+  FinanceSummary,
+  FinanceWorkItem,
+  FinanceWorkItemKind,
+  FinanceWorkQueueSort,
+  SettlementRevenueDetail,
+} from "@/lib/finance-summary-types"
 import type { FinanceTab } from "@/components/admin/admin-types"
-import { fetchFinanceSummary, confirmRevenueReceipt } from "@/lib/operations-api"
+import {
+  confirmRevenueReceipt,
+  fetchFinanceSummary,
+} from "@/lib/operations-api"
+import {
+  getWorkQueueNavigateAction,
+  isInlineWorkQueueMutationEnabled,
+} from "@/lib/finance-work-queue-actions"
+import {
+  FINANCE_WORK_ITEM_KIND_LABELS,
+  sortFinanceWorkItems,
+} from "@/lib/finance-work-item-utils"
 import { cn } from "@/lib/utils"
 
 type Props = {
@@ -23,12 +40,34 @@ const TAB_LABELS: Record<FinanceTab, string> = {
   expenses: "지출 관리",
 }
 
+const SORT_OPTIONS: Array<{ value: FinanceWorkQueueSort; label: string }> = [
+  { value: "remaining_desc", label: "미처리 금액 큰 순" },
+  { value: "newest", label: "최신순" },
+  { value: "oldest", label: "오래된 순" },
+  { value: "kind", label: "유형" },
+]
+
+const RECEIVABLE_KINDS: FinanceWorkItemKind[] = [
+  "revenue_receivable",
+  "dues_receivable",
+  "return_receivable",
+]
+
+const PAYABLE_KINDS: FinanceWorkItemKind[] = [
+  "participant_payable",
+  "management_payable",
+  "additional_payable",
+]
+
 export function AdminFinanceStatusView({ onNavigate }: Props) {
   const [summary, setSummary] = useState<FinanceSummary | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [recvOpen, setRecvOpen] = useState(true)
-  const [payOpen, setPayOpen] = useState(true)
+  const [recvSort, setRecvSort] = useState<FinanceWorkQueueSort>("remaining_desc")
+  const [paySort, setPaySort] = useState<FinanceWorkQueueSort>("remaining_desc")
+  const [recvKindFilter, setRecvKindFilter] = useState<FinanceWorkItemKind | "all">("all")
+  const [payKindFilter, setPayKindFilter] = useState<FinanceWorkItemKind | "all">("all")
+  const [expandedId, setExpandedId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -45,6 +84,24 @@ export function AdminFinanceStatusView({ onNavigate }: Props) {
   useEffect(() => {
     void load()
   }, [load])
+
+  const receivableQueue = useMemo(() => {
+    if (!summary) return []
+    let items = summary.receivableQueue
+    if (recvKindFilter !== "all") {
+      items = items.filter((i) => i.kind === recvKindFilter)
+    }
+    return sortFinanceWorkItems(items, recvSort)
+  }, [summary, recvSort, recvKindFilter])
+
+  const payableQueue = useMemo(() => {
+    if (!summary) return []
+    let items = summary.payableQueue
+    if (payKindFilter !== "all") {
+      items = items.filter((i) => i.kind === payKindFilter)
+    }
+    return sortFinanceWorkItems(items, paySort)
+  }, [summary, paySort, payKindFilter])
 
   if (loading) {
     return <p className="py-10 text-center text-sm text-muted-foreground">불러오는 중…</p>
@@ -158,29 +215,38 @@ export function AdminFinanceStatusView({ onNavigate }: Props) {
         </p>
       </Card>
 
-      <DrilldownSection
-        title="받을 금액 상세"
-        open={recvOpen}
-        onToggle={() => setRecvOpen((v) => !v)}
+      <WorkQueueSection
+        title="받을 금액 업무"
         emptyLabel="받을 금액 없음"
-        onReceiptConfirmed={load}
-        groups={[
-          { label: "혈비 미수", items: summary.drilldown.duesReceivable },
-          { label: "수익 미입금", items: summary.drilldown.revenueReceivable, receiptEnabled: true },
-          { label: "반환 받을 금액", items: summary.drilldown.returnReceivable },
-        ]}
+        queue={receivableQueue}
+        totalRemaining={summary.receivables}
+        sort={recvSort}
+        kindFilter={recvKindFilter}
+        kindOptions={RECEIVABLE_KINDS}
+        onSortChange={setRecvSort}
+        onKindFilterChange={setRecvKindFilter}
+        expandedId={expandedId}
+        onToggleExpand={(id) => setExpandedId((prev) => (prev === id ? null : id))}
+        revenueDetails={summary.revenueDetails}
+        onActionComplete={load}
+        onNavigate={onNavigate}
       />
 
-      <DrilldownSection
-        title="지급 예정 상세"
-        open={payOpen}
-        onToggle={() => setPayOpen((v) => !v)}
+      <WorkQueueSection
+        title="지급 예정 업무"
         emptyLabel="지급 예정 없음"
-        groups={[
-          { label: "혈맹원 정산", items: summary.drilldown.participantPayable },
-          { label: "관리비", items: summary.drilldown.managementPayable },
-          { label: "추가지급", items: summary.drilldown.additionalPayable },
-        ]}
+        queue={payableQueue}
+        totalRemaining={summary.payables}
+        sort={paySort}
+        kindFilter={payKindFilter}
+        kindOptions={PAYABLE_KINDS}
+        onSortChange={setPaySort}
+        onKindFilterChange={setPayKindFilter}
+        expandedId={expandedId}
+        onToggleExpand={(id) => setExpandedId((prev) => (prev === id ? null : id))}
+        revenueDetails={summary.revenueDetails}
+        onActionComplete={load}
+        onNavigate={onNavigate}
       />
 
       {summary.checkpoint && (
@@ -194,88 +260,309 @@ export function AdminFinanceStatusView({ onNavigate }: Props) {
   )
 }
 
-function DrilldownSection({
+function WorkQueueSection({
   title,
-  open,
-  onToggle,
   emptyLabel,
-  groups,
-  onReceiptConfirmed,
+  queue,
+  totalRemaining,
+  sort,
+  kindFilter,
+  kindOptions,
+  onSortChange,
+  onKindFilterChange,
+  expandedId,
+  onToggleExpand,
+  revenueDetails,
+  onActionComplete,
+  onNavigate,
 }: {
   title: string
-  open: boolean
-  onToggle: () => void
   emptyLabel: string
-  onReceiptConfirmed?: () => void
-  groups: Array<{
-    label: string
-    receiptEnabled?: boolean
-    items: Array<{
-      id: string
-      label: string
-      subLabel?: string
-      amount: number
-      sourceType?: "boss" | "siege"
-      sourceId?: string
-    }>
-  }>
+  queue: FinanceWorkItem[]
+  totalRemaining: number
+  sort: FinanceWorkQueueSort
+  kindFilter: FinanceWorkItemKind | "all"
+  kindOptions: FinanceWorkItemKind[]
+  onSortChange: (s: FinanceWorkQueueSort) => void
+  onKindFilterChange: (k: FinanceWorkItemKind | "all") => void
+  expandedId: string | null
+  onToggleExpand: (id: string) => void
+  revenueDetails: Record<string, SettlementRevenueDetail>
+  onActionComplete: () => void
+  onNavigate: (nav: AdminNavState) => void
 }) {
-  const total = groups.reduce((s, g) => s + g.items.reduce((a, i) => a + i.amount, 0), 0)
+  const [open, setOpen] = useState(true)
+  const queueSum = queue.reduce((s, i) => s + i.remainingAmount, 0)
 
   return (
     <div className="mb-4">
       <button
         type="button"
-        onClick={onToggle}
+        onClick={() => setOpen((v) => !v)}
         className="mb-2 flex w-full items-center justify-between"
       >
         <SectionTitle>{title}</SectionTitle>
         <span className="flex items-center gap-2 text-xs text-muted-foreground">
-          {formatWonShort(total)}원
+          {formatWonShort(queueSum)}원
           {open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
         </span>
       </button>
 
       {open && (
-        <div className="flex flex-col gap-3">
-          {total === 0 && (
+        <>
+          <div className="mb-2 flex flex-wrap gap-2">
+            <select
+              value={sort}
+              onChange={(e) => onSortChange(e.target.value as FinanceWorkQueueSort)}
+              className="rounded-lg border border-border bg-background px-2 py-1 text-[10px]"
+            >
+              {SORT_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+            <select
+              value={kindFilter}
+              onChange={(e) =>
+                onKindFilterChange(e.target.value as FinanceWorkItemKind | "all")
+              }
+              className="rounded-lg border border-border bg-background px-2 py-1 text-[10px]"
+            >
+              <option value="all">전체 유형</option>
+              {kindOptions.map((k) => (
+                <option key={k} value={k}>
+                  {FINANCE_WORK_ITEM_KIND_LABELS[k]}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {queue.length === 0 ? (
             <Card className="py-4 text-center text-xs text-muted-foreground">{emptyLabel}</Card>
+          ) : (
+            <div className="flex flex-col gap-1.5">
+              {queue.map((item) => (
+                <WorkItemCard
+                  key={item.id}
+                  item={item}
+                  expanded={expandedId === item.id}
+                  onToggle={() => onToggleExpand(item.id)}
+                  revenueDetail={
+                    item.settlementDbId ? revenueDetails[item.settlementDbId] : undefined
+                  }
+                  onActionComplete={onActionComplete}
+                  onNavigate={onNavigate}
+                />
+              ))}
+            </div>
           )}
-          {groups.map((g) =>
-            g.items.length === 0 ? null : (
-              <div key={g.label}>
-                <Badge tone="neutral" className="mb-2">
-                  {g.label}
-                </Badge>
-                <div className="flex flex-col gap-1.5">
-                  {g.items.map((item) => (
-                    <Card key={item.id} className="px-3 py-2">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-xs font-medium">{item.label}</p>
-                          {item.subLabel && (
-                            <p className="text-[10px] text-muted-foreground">{item.subLabel}</p>
-                          )}
-                        </div>
-                        <p className="text-xs font-semibold">{formatWon(item.amount)}원</p>
-                      </div>
-                      {g.receiptEnabled && item.sourceType && item.sourceId && onReceiptConfirmed && (
-                        <RevenueReceiptForm
-                          sourceType={item.sourceType}
-                          sourceId={item.sourceId}
-                          maxAmount={item.amount}
-                          onConfirmed={onReceiptConfirmed}
-                        />
-                      )}
-                    </Card>
-                  ))}
-                </div>
-              </div>
-            ),
+
+          {kindFilter === "all" && queueSum !== totalRemaining && queue.length > 0 && (
+            <p className="mt-2 text-[10px] text-destructive">
+              집계 불일치: 큐 합계 {formatWon(queueSum)} ≠ 전체 {formatWon(totalRemaining)}
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+function WorkItemCard({
+  item,
+  expanded,
+  onToggle,
+  revenueDetail,
+  onActionComplete,
+  onNavigate,
+}: {
+  item: FinanceWorkItem
+  expanded: boolean
+  onToggle: () => void
+  revenueDetail?: SettlementRevenueDetail
+  onActionComplete: () => void
+  onNavigate: (nav: AdminNavState) => void
+}) {
+  const navigateAction = getWorkQueueNavigateAction(item)
+
+  return (
+    <Card className="overflow-hidden">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex w-full items-center justify-between px-3 py-2 text-left"
+      >
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Badge tone="neutral" className="text-[9px]">
+              {FINANCE_WORK_ITEM_KIND_LABELS[item.kind]}
+            </Badge>
+            <span className="text-[10px] text-muted-foreground">{item.statusLabel}</span>
+          </div>
+          <p className="truncate text-xs font-medium">{item.title}</p>
+          <p className="truncate text-[10px] text-muted-foreground">{item.subtitle}</p>
+        </div>
+        <div className="ml-2 shrink-0 text-right">
+          <p className="text-xs font-semibold">{formatWon(item.remainingAmount)}원</p>
+          <p className="text-[9px] text-muted-foreground">
+            / {formatWonShort(item.totalAmount)}
+          </p>
+        </div>
+      </button>
+
+      {expanded && (
+        <div className="border-t border-border px-3 py-2">
+          <p className="mb-2 text-[10px] text-muted-foreground">{item.description}</p>
+
+          {isInlineWorkQueueMutationEnabled(item.kind) &&
+            item.kind === "revenue_receivable" &&
+            revenueDetail && (
+              <RevenueDetailPanel detail={revenueDetail} onReceiptConfirmed={onActionComplete} />
+            )}
+
+          {!isInlineWorkQueueMutationEnabled(item.kind) && navigateAction && (
+            <WorkQueueNavigateButton action={navigateAction} onNavigate={onNavigate} />
+          )}
+
+          {!isInlineWorkQueueMutationEnabled(item.kind) && !navigateAction && (
+            <p className="text-[10px] text-muted-foreground">
+              해당 업무는 기존 화면에서 처리해주세요.
+            </p>
           )}
         </div>
       )}
+    </Card>
+  )
+}
+
+function WorkQueueNavigateButton({
+  action,
+  onNavigate,
+}: {
+  action: { label: string; nav: AdminNavState }
+  onNavigate: (nav: AdminNavState) => void
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="text-[10px] text-muted-foreground">
+        Finance 2.0-B 이전에는 이 화면에서 직접 처리하지 않습니다. 기존 업무 화면에서
+        완료해주세요.
+      </p>
+      <button
+        type="button"
+        onClick={() => onNavigate(action.nav)}
+        className="rounded-lg border border-primary/40 bg-primary/10 px-3 py-2 text-xs font-medium text-primary"
+      >
+        {action.label}
+      </button>
     </div>
+  )
+}
+
+function RevenueDetailPanel({
+  detail,
+  onReceiptConfirmed,
+}: {
+  detail: SettlementRevenueDetail
+  onReceiptConfirmed: () => void
+}) {
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <MiniStat label="총 수익" value={detail.totalIncome} />
+        <MiniStat label="입금 완료" value={detail.receivedAmount} />
+        <MiniStat label="미입금" value={detail.receivableAmount} tone="primary" />
+      </div>
+
+      <div>
+        <p className="mb-1 text-[10px] font-medium text-muted-foreground">수익 발생 내용</p>
+        {detail.items.length === 0 ? (
+          <Card className="py-3 text-center text-[10px] text-muted-foreground">
+            수익 상세 기록 없음
+          </Card>
+        ) : (
+          <div className="flex flex-col gap-1">
+            {detail.items.map((row) => (
+              <Card key={row.id} className="px-2.5 py-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <p className="text-xs font-medium">{row.description}</p>
+                    {(row.quantity != null || row.unitPrice != null) && (
+                      <p className="text-[10px] text-muted-foreground">
+                        {row.quantity != null ? `수량 ${row.quantity}` : ""}
+                        {row.quantity != null && row.unitPrice != null ? " · " : ""}
+                        {row.unitPrice != null ? `단가 ${formatWon(row.unitPrice)}` : ""}
+                      </p>
+                    )}
+                    {row.memo && (
+                      <p className="text-[10px] text-muted-foreground">{row.memo}</p>
+                    )}
+                  </div>
+                  <p className="shrink-0 text-xs font-semibold">{formatWon(row.amount)}원</p>
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div>
+        <p className="mb-1 text-[10px] font-medium text-muted-foreground">입금 이력</p>
+        {detail.receipts.length === 0 ? (
+          <Card className="py-3 text-center text-[10px] text-muted-foreground">
+            입금 이력 없음
+          </Card>
+        ) : (
+          <div className="flex flex-col gap-1">
+            {detail.receipts.map((r) => (
+              <Card key={r.id} className="flex items-center justify-between px-2.5 py-2">
+                <div>
+                  <p className="text-[10px] text-muted-foreground">
+                    {new Date(r.receivedAt).toLocaleString("ko-KR")}
+                  </p>
+                  {r.memo && <p className="text-[10px]">{r.memo}</p>}
+                </div>
+                <p className="text-xs font-semibold">{formatWon(r.amount)}원</p>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {detail.receivableAmount > 0 && (
+        <RevenueReceiptForm
+          sourceType={detail.sourceType}
+          sourceId={detail.sourceId}
+          maxAmount={detail.receivableAmount}
+          onConfirmed={onReceiptConfirmed}
+        />
+      )}
+    </div>
+  )
+}
+
+function MiniStat({
+  label,
+  value,
+  tone = "neutral",
+}: {
+  label: string
+  value: number
+  tone?: "neutral" | "primary"
+}) {
+  return (
+    <Card className="px-2 py-1.5">
+      <p className="text-[9px] text-muted-foreground">{label}</p>
+      <p
+        className={cn(
+          "text-xs font-semibold tabular-nums",
+          tone === "primary" ? "text-primary" : "text-foreground",
+        )}
+      >
+        {formatWon(value)}원
+      </p>
+    </Card>
   )
 }
 
@@ -313,7 +600,7 @@ function RevenueReceiptForm({
   }
 
   return (
-    <div className="mt-2 flex flex-wrap items-end gap-2 border-t border-border pt-2">
+    <div className="flex flex-wrap items-end gap-2 border-t border-border pt-2">
       <input
         type="text"
         inputMode="numeric"

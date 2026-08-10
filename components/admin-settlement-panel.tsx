@@ -13,7 +13,12 @@ import { calcSettlementPreview } from "@/lib/settlement-preview-utils"
 import { formatWon } from "@/lib/guild-data"
 import { generateDaySlots } from "@/lib/boss-time-slots"
 import { SettlementRoundingPreview } from "@/components/admin/settlement-rounding-preview"
+import {
+  SettlementRevenueItemsEditor,
+  validateRevenueItemsBeforeCreate,
+} from "@/components/admin/settlement-revenue-items-editor"
 import { SettlementManagementFeeSection } from "@/components/settlement-management-fee-section"
+import type { SettlementRevenueItemInput } from "@/lib/settlement-revenue-item-types"
 import { useGuildOperationSettings } from "@/components/admin/use-guild-operation-settings"
 import { useAuth } from "@/components/auth-context"
 import { parseSlotIdToOccurredAtIso } from "@/lib/event-occurred-at-utils"
@@ -56,6 +61,7 @@ export function AdminSettlementPanel({ slotId: controlledSlotId, embedded = fals
   const [totalRevenue, setTotalRevenue] = useState("")
   const [guildShare, setGuildShare] = useState("")
   const [managementFee, setManagementFee] = useState("")
+  const [revenueItems, setRevenueItems] = useState<SettlementRevenueItemInput[]>([])
   const [feedback, setFeedback] = useState<string | null>(null)
   const occurredAtIso = useMemo(
     () => parseSlotIdToOccurredAtIso(selectedSlotId),
@@ -101,12 +107,24 @@ export function AdminSettlementPanel({ slotId: controlledSlotId, embedded = fals
     const rev = parseInt(totalRevenue.replace(/\D/g, ""), 10) || 0
     const guild = parseInt(guildShare.replace(/\D/g, ""), 10) || 0
     const mgmt = parseInt(managementFee.replace(/\D/g, ""), 10) || 0
-    const result = await createSettlement(selectedSlotId, rev, guild, mgmt)
+    const itemCheck = validateRevenueItemsBeforeCreate(rev, revenueItems)
+    if (!itemCheck.ok) {
+      setFeedback(itemCheck.message)
+      return
+    }
+    const result = await createSettlement(
+      selectedSlotId,
+      rev,
+      guild,
+      mgmt,
+      revenueItems.length > 0 ? revenueItems : undefined,
+    )
     setFeedback(result.message)
     if (result.ok) {
       setTotalRevenue("")
       setGuildShare("")
       setManagementFee("")
+      setRevenueItems([])
     }
   }
 
@@ -233,6 +251,12 @@ export function AdminSettlementPanel({ slotId: controlledSlotId, embedded = fals
             preview={preview}
             participantCount={check?.attendees.length ?? 0}
             operationSettings={operationSettings}
+          />
+
+          <SettlementRevenueItemsEditor
+            totalIncome={parseInt(totalRevenue.replace(/\D/g, ""), 10) || 0}
+            value={revenueItems}
+            onChange={setRevenueItems}
           />
 
           {feedback && <p className="text-center text-xs text-muted-foreground">{feedback}</p>}

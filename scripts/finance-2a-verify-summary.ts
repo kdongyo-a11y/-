@@ -126,6 +126,8 @@ function main() {
         displaySub: "",
         totalIncome: 10_000_000,
         receivedAmount: 0,
+        revenueItems: [],
+        receipts: [],
         participants: [
           {
             memberId: "m1",
@@ -152,6 +154,8 @@ function main() {
         displaySub: "",
         totalIncome: 10_000_000,
         receivedAmount: 4_000_000,
+        revenueItems: [],
+        receipts: [],
         participants: [
           {
             memberId: "m2",
@@ -243,6 +247,8 @@ function main() {
         displaySub: "",
         totalIncome: 1,
         receivedAmount: 0,
+        revenueItems: [],
+        receipts: [],
         participants: [
           {
             memberId: "m",

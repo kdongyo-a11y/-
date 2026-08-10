@@ -72,6 +72,7 @@ export const settlementApi = {
     totalRevenue: number,
     guildShareInput: number,
     managementFeeManualInput = 0,
+    revenueItems?: import("@/lib/settlement-revenue-item-types").SettlementRevenueItemInput[],
   ) =>
     postJson<{ ok: boolean; message: string }>("/api/settlements/mutate", {
       action: "create_boss",
@@ -79,6 +80,7 @@ export const settlementApi = {
       totalRevenue,
       guildShareInput,
       managementFeeManualInput,
+      revenueItems,
     }),
   createSiege: (
     siegeId: string,
@@ -86,6 +88,7 @@ export const settlementApi = {
     guildShareInput: number,
     memo?: string,
     managementFeeManualInput = 0,
+    revenueItems?: import("@/lib/settlement-revenue-item-types").SettlementRevenueItemInput[],
   ) =>
     postJson<{ ok: boolean; message: string }>("/api/settlements/mutate", {
       action: "create_siege",
@@ -94,6 +97,7 @@ export const settlementApi = {
       guildShareInput,
       memo,
       managementFeeManualInput,
+      revenueItems,
     }),
   revise: (
     sourceType: "boss" | "siege",
@@ -326,6 +330,31 @@ export async function confirmRevenueReceipt(input: {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action: "confirm_receipt", ...input }),
+  })
+  return res.json()
+}
+
+export async function updateSettlementRevenueItems(input: {
+  sourceType: "boss" | "siege"
+  sourceId: string
+  action?: "update_metadata" | "update_amounts"
+  updates?: import("@/lib/settlement-revenue-item-types").SettlementRevenueItemUpdateInput[]
+  amountItems?: Array<{ id: string; amount: number }>
+}): Promise<{
+  ok: boolean
+  message: string
+  items?: import("@/lib/settlement-revenue-item-types").SettlementRevenueItem[]
+}> {
+  const res = await fetch("/api/finance/revenue-items/mutate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      action: input.action ?? "update_items",
+      sourceType: input.sourceType,
+      sourceId: input.sourceId,
+      updates: input.updates,
+      amountItems: input.amountItems,
+    }),
   })
   return res.json()
 }

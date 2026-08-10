@@ -29,6 +29,11 @@ import {
   SettlementRevisionSummary,
 } from "@/components/admin/settlement-revision-ui"
 import { SettlementRoundingPreview } from "@/components/admin/settlement-rounding-preview"
+import {
+  SettlementRevenueItemsEditor,
+  validateRevenueItemsBeforeCreate,
+} from "@/components/admin/settlement-revenue-items-editor"
+import type { SettlementRevenueItemInput } from "@/lib/settlement-revenue-item-types"
 import { SettlementManagementFeeSection } from "@/components/settlement-management-fee-section"
 import { useGuildOperationSettings } from "@/components/admin/use-guild-operation-settings"
 import { useAuth } from "@/components/auth-context"
@@ -117,6 +122,7 @@ export function AdminSiegePanel({ siegeId: controlledSiegeId, embedded = false }
   const [guildShare, setGuildShare] = useState("")
   const [managementFee, setManagementFee] = useState("")
   const [settlementMemo, setSettlementMemo] = useState("")
+  const [revenueItems, setRevenueItems] = useState<SettlementRevenueItemInput[]>([])
   const [settlementFeedback, setSettlementFeedback] = useState<string | null>(null)
 
   const selectedSiege = getSiege(selectedSiegeId)
@@ -275,12 +281,18 @@ export function AdminSiegePanel({ siegeId: controlledSiegeId, embedded = false }
     const rev = parseInt(totalRevenue.replace(/\D/g, ""), 10) || 0
     const guild = parseInt(guildShare.replace(/\D/g, ""), 10) || 0
     const mgmt = parseInt(managementFee.replace(/\D/g, ""), 10) || 0
+    const itemCheck = validateRevenueItemsBeforeCreate(rev, revenueItems)
+    if (!itemCheck.ok) {
+      setSettlementFeedback(itemCheck.message)
+      return
+    }
     const result = await createSiegeSettlement(
       selectedSiege.id,
       rev,
       guild,
       settlementMemo,
       mgmt,
+      revenueItems.length > 0 ? revenueItems : undefined,
     )
     setSettlementFeedback(result.message)
     if (result.ok) {
@@ -288,6 +300,7 @@ export function AdminSiegePanel({ siegeId: controlledSiegeId, embedded = false }
       setGuildShare("")
       setManagementFee("")
       setSettlementMemo("")
+      setRevenueItems([])
     }
   }
 
@@ -800,6 +813,7 @@ export function AdminSiegePanel({ siegeId: controlledSiegeId, embedded = false }
                   guildShare={guildShare}
                   managementFee={managementFee}
                   settlementMemo={settlementMemo}
+                  revenueItems={revenueItems}
                   preview={preview}
                   participantCount={selectedSiege.confirmedAttendees.length}
                   feedback={settlementFeedback}
@@ -808,6 +822,7 @@ export function AdminSiegePanel({ siegeId: controlledSiegeId, embedded = false }
                   onGuildChange={setGuildShare}
                   onManagementFeeChange={setManagementFee}
                   onMemoChange={setSettlementMemo}
+                  onRevenueItemsChange={setRevenueItems}
                   onSubmit={handleCreateSettlement}
                 />
               )}
@@ -1125,6 +1140,7 @@ function SettlementForm({
   guildShare,
   managementFee,
   settlementMemo,
+  revenueItems,
   preview,
   participantCount,
   feedback,
@@ -1133,12 +1149,14 @@ function SettlementForm({
   onGuildChange,
   onManagementFeeChange,
   onMemoChange,
+  onRevenueItemsChange,
   onSubmit,
 }: {
   totalRevenue: string
   guildShare: string
   managementFee: string
   settlementMemo: string
+  revenueItems: SettlementRevenueItemInput[]
   preview: SettlementCalcResult
   participantCount: number
   feedback: string | null
@@ -1147,6 +1165,7 @@ function SettlementForm({
   onGuildChange: (v: string) => void
   onManagementFeeChange: (v: string) => void
   onMemoChange: (v: string) => void
+  onRevenueItemsChange: (items: SettlementRevenueItemInput[]) => void
   onSubmit: () => void
 }) {
   return (
@@ -1201,6 +1220,11 @@ function SettlementForm({
         preview={preview}
         participantCount={participantCount}
         operationSettings={operationSettings}
+      />
+      <SettlementRevenueItemsEditor
+        totalIncome={parseInt(totalRevenue.replace(/\D/g, ""), 10) || 0}
+        value={revenueItems}
+        onChange={onRevenueItemsChange}
       />
       {feedback && <p className="text-center text-xs text-muted-foreground">{feedback}</p>}
       <button

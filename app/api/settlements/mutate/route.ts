@@ -24,6 +24,7 @@ import {
 } from "@/lib/supabase/settlement-mutate-helpers"
 import type { SettlementModificationLog, SettlementSourceType } from "@/lib/settlement-types"
 import type { AttendeeInput } from "@/lib/settlement-revision-utils"
+import type { SettlementRevenueItemInput } from "@/lib/settlement-revenue-item-types"
 import { getMemberReceiptPendingState } from "@/lib/settlement-revision-utils"
 import {
   onManagementAdminPaid,
@@ -40,6 +41,7 @@ type Body = {
   totalRevenue?: number
   guildShareInput?: number
   managementFeeManualInput?: number
+  revenueItems?: SettlementRevenueItemInput[]
   memo?: string
   memberId?: string
   attendees?: AttendeeInput[]
@@ -127,6 +129,7 @@ export async function POST(request: Request) {
           body.totalRevenue ?? 0,
           body.guildShareInput ?? 0,
           body.managementFeeManualInput ?? 0,
+          body.revenueItems,
         )
         return NextResponse.json(result, { status: result.ok ? 200 : 400 })
       }
@@ -141,6 +144,7 @@ export async function POST(request: Request) {
           body.guildShareInput ?? 0,
           body.memo,
           body.managementFeeManualInput ?? 0,
+          body.revenueItems,
         )
         return NextResponse.json(result, { status: result.ok ? 200 : 400 })
       }

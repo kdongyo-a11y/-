@@ -66,6 +66,8 @@ type SettlementContextValue = {
     slotId: string,
     totalRevenue: number,
     guildShareInput: number,
+    managementFeeManualInput?: number,
+    revenueItems?: import("@/lib/settlement-revenue-item-types").SettlementRevenueItemInput[],
   ) => Promise<{ ok: boolean; message: string }>
   createSiegeSettlement: (
     siegeId: string,
@@ -73,12 +75,14 @@ type SettlementContextValue = {
     guildShareInput: number,
     memo?: string,
     managementFeeManualInput?: number,
+    revenueItems?: import("@/lib/settlement-revenue-item-types").SettlementRevenueItemInput[],
   ) => Promise<{ ok: boolean; message: string }>
   createSettlement: (
     slotId: string,
     totalRevenue: number,
     guildShareInput: number,
     managementFeeManualInput?: number,
+    revenueItems?: import("@/lib/settlement-revenue-item-types").SettlementRevenueItemInput[],
   ) => Promise<{ ok: boolean; message: string }>
   reviseSettlement: (
     sourceType: SettlementSourceType,
@@ -415,12 +419,14 @@ export function SettlementProvider({ children }: { children: ReactNode }) {
       totalRevenue: number,
       guildShareInput: number,
       managementFeeManualInput = 0,
+      revenueItems?: import("@/lib/settlement-revenue-item-types").SettlementRevenueItemInput[],
     ): Promise<{ ok: boolean; message: string }> => {
       const result = await settlementApi.createBoss(
         slotId,
         totalRevenue,
         guildShareInput,
         managementFeeManualInput,
+        revenueItems,
       )
       if (result.ok) await afterSettlementMutation()
       return result
@@ -435,6 +441,7 @@ export function SettlementProvider({ children }: { children: ReactNode }) {
       guildShareInput: number,
       memo = "",
       managementFeeManualInput = 0,
+      revenueItems?: import("@/lib/settlement-revenue-item-types").SettlementRevenueItemInput[],
     ): Promise<{ ok: boolean; message: string }> => {
       const result = await settlementApi.createSiege(
         siegeId,
@@ -442,6 +449,7 @@ export function SettlementProvider({ children }: { children: ReactNode }) {
         guildShareInput,
         memo,
         managementFeeManualInput,
+        revenueItems,
       )
       if (result.ok) await afterSettlementMutation()
       return result

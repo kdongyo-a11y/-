@@ -8,6 +8,7 @@ import {
   sumRevenueReceipts,
   validateRevenueReceiptAmount,
 } from "@/lib/settlement-revenue-receipt-utils"
+import { mapFinanceRevenueRpcError } from "@/lib/settlement-revenue-item-rpc-errors"
 import { insertGuildCashMovement } from "@/lib/supabase/guild-cash-data"
 
 function mapReceiptRow(row: SettlementRevenueReceiptRow): SettlementRevenueReceipt {
@@ -83,20 +84,25 @@ export async function confirmSettlementRevenueReceipt(
   const validation = validateRevenueReceiptAmount(input.totalIncome, existing, input.amount)
   if (!validation.ok) return validation
 
-  const { data: receiptRow, error: receiptError } = await admin
-    .from("settlement_revenue_receipts")
-    .insert({
-      guild_id: guildId,
-      settlement_id: input.settlementId,
-      amount: Math.round(input.amount),
-      received_at: input.receivedAt,
-      confirmed_by: actorId,
-      memo: input.memo.trim(),
-    })
-    .select("*")
-    .single()
+  const { data: receiptRow, error: receiptError } = await admin.rpc(
+    "insert_settlement_revenue_receipt_locked",
+    {
+      p_guild_id: guildId,
+      p_settlement_id: input.settlementId,
+      p_actor_id: actorId,
+      p_amount: Math.round(input.amount),
+      p_received_at: input.receivedAt,
+      p_memo: input.memo.trim(),
+    },
+  )
 
-  if (receiptError) throw receiptError
+  if (receiptError) {
+    return {
+      ok: false,
+      message:
+        mapFinanceRevenueRpcError(receiptError) ?? "수익 입금 확인 중 오류가 발생했습니다.",
+    }
+  }
 
   const receipt = mapReceiptRow(receiptRow as SettlementRevenueReceiptRow)
 
