@@ -153,7 +153,12 @@ export function AdminSiegePanel({ siegeId: controlledSiegeId, embedded = false }
     return siegeRoster.filter(
       (m) => !confirmedIds.has(m.id) && (!q || m.nickname.toLowerCase().includes(q)),
     )
-  }, [selectedSiege, search])
+  }, [selectedSiege, search, siegeRoster])
+
+  const surveyAdminRoster = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return siegeRoster.filter((m) => !q || m.nickname.toLowerCase().includes(q))
+  }, [search, siegeRoster])
 
   const preview = useMemo(() => {
     const rev = parseInt(totalRevenue.replace(/\D/g, ""), 10) || 0
@@ -491,18 +496,20 @@ export function AdminSiegePanel({ siegeId: controlledSiegeId, embedded = false }
 
                   {selectedSiege.status === "survey_closed" && (
                     <>
-                      <SectionTitle>사전조사 관리자 수정</SectionTitle>
+                      <SectionTitle action={<Badge tone="neutral">{surveyAdminRoster.length}명</Badge>}>
+                        사전조사 관리자 수정
+                      </SectionTitle>
                       <p className="mb-2 text-[11px] text-muted-foreground">
                         마감 후 혈원은 직접 변경할 수 없습니다. 관리자만 상태를 수정할 수 있습니다.
                       </p>
-                      <div className="mb-4 flex flex-col gap-2">
-                        {siegeRoster
-                          .filter((m) => {
-                            const q = search.trim().toLowerCase()
-                            return !q || m.nickname.toLowerCase().includes(q)
-                          })
-                          .slice(0, 12)
-                          .map((m) => {
+                      <div className="mb-4 max-h-64 overflow-y-auto rounded-xl border border-border bg-card/50 p-2">
+                        <div className="flex flex-col gap-2">
+                        {surveyAdminRoster.length === 0 ? (
+                          <Card className="py-4 text-center text-xs text-muted-foreground">
+                            {siegeRoster.length === 0 ? "혈원이 없습니다." : "검색 결과가 없습니다."}
+                          </Card>
+                        ) : (
+                          surveyAdminRoster.map((m) => {
                             const status = selectedSiege.surveyResponses.find(
                               (r) => r.memberId === m.id,
                             )?.response ?? "미응답"
@@ -544,7 +551,9 @@ export function AdminSiegePanel({ siegeId: controlledSiegeId, embedded = false }
                                 </div>
                               </Card>
                             )
-                          })}
+                          })
+                        )}
+                        </div>
                       </div>
                     </>
                   )}
@@ -622,22 +631,36 @@ export function AdminSiegePanel({ siegeId: controlledSiegeId, embedded = false }
                         참여자 추가
                       </button>
 
-                      {showAddPicker && nonConfirmedRoster.length > 0 && (
+                      {showAddPicker && (
                         <div className="flex flex-col gap-2 rounded-xl border border-border bg-secondary/30 p-3">
-                          <p className="text-xs font-medium text-muted-foreground">추가할 혈원 선택</p>
-                          {nonConfirmedRoster.slice(0, 10).map((m) => (
-                            <Card key={m.id} className="flex items-center justify-between py-2.5">
-                              <p className="text-sm text-foreground">{m.nickname}</p>
-                              <button
-                                type="button"
-                                onClick={() => openAddMember(m)}
-                                className="flex items-center gap-1 rounded-lg border border-primary/30 px-2 py-1 text-[10px] text-primary"
-                              >
-                                <UserPlus className="h-3 w-3" />
-                                추가
-                              </button>
-                            </Card>
-                          ))}
+                          <p className="text-xs font-medium text-muted-foreground">
+                            추가할 혈원 선택 · {nonConfirmedRoster.length}명
+                          </p>
+                          <div className="max-h-64 overflow-y-auto">
+                            <div className="flex flex-col gap-2">
+                              {nonConfirmedRoster.length === 0 ? (
+                                <Card className="py-4 text-center text-xs text-muted-foreground">
+                                  {selectedSiege.confirmedAttendees.length >= siegeRoster.length
+                                    ? "추가 가능한 혈원이 없습니다."
+                                    : "검색 결과가 없습니다."}
+                                </Card>
+                              ) : (
+                                nonConfirmedRoster.map((m) => (
+                                  <Card key={m.id} className="flex items-center justify-between py-2.5">
+                                    <p className="text-sm text-foreground">{m.nickname}</p>
+                                    <button
+                                      type="button"
+                                      onClick={() => openAddMember(m)}
+                                      className="flex items-center gap-1 rounded-lg border border-primary/30 px-2 py-1 text-[10px] text-primary"
+                                    >
+                                      <UserPlus className="h-3 w-3" />
+                                      추가
+                                    </button>
+                                  </Card>
+                                ))
+                              )}
+                            </div>
+                          </div>
                         </div>
                       )}
                     </>
