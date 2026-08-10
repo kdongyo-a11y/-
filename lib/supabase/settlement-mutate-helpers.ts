@@ -6,6 +6,7 @@ import { getBossEventBySlotId } from "@/lib/supabase/boss-event-helpers"
 import { getGuildShareSubThousand } from "@/lib/settlement-utils"
 import { calcSettlementWithPolicy } from "@/lib/operation-settings-utils"
 import { resolveSettlementPolicyInputs } from "@/lib/supabase/operation-settings-data"
+import { bossEventOccurredAtIso, siegeEventOccurredAtIso } from "@/lib/event-occurred-at-utils"
 import {
   computeOverallStatus,
   createInitialParticipant,
@@ -89,6 +90,7 @@ function finalize(settlement: Settlement): Settlement {
 async function calcSettlementForCreate(
   admin: SupabaseClient,
   guildId: string,
+  occurredAtIso: string,
   totalRevenue: number,
   guildShareInput: number,
   managementFeeManualInput: number,
@@ -97,6 +99,7 @@ async function calcSettlementForCreate(
   const policyResult = await resolveSettlementPolicyInputs(
     admin,
     guildId,
+    occurredAtIso,
     totalRevenue,
     guildShareInput,
     managementFeeManualInput,
@@ -115,6 +118,11 @@ async function calcSettlementForCreate(
     managementFeePercentage: policyResult.managementFeePercentage,
     managementFeeManualInput: policyResult.managementFeeManualInput,
     allocations: policyResult.allocations,
+    policyVersionMeta: {
+      policyVersionId: policyResult.policyVersionId,
+      policyVersion: policyResult.policyVersion,
+      policyEffectiveFrom: policyResult.policyEffectiveFrom,
+    },
   })
 
   return { ok: true as const, calc, policyResult }
@@ -241,6 +249,7 @@ export async function createBossSettlementOnServer(
   const calcResult = await calcSettlementForCreate(
     admin,
     guildId,
+    bossEventOccurredAtIso(parsed.eventDate, parsed.slotHour),
     totalRevenue,
     guildShareInput,
     managementFeeManualInput,
@@ -337,6 +346,7 @@ export async function createSiegeSettlementOnServer(
   const calcResult = await calcSettlementForCreate(
     admin,
     guildId,
+    siegeEventOccurredAtIso(siege.event_date, String(siege.start_time)),
     totalRevenue,
     guildShareInput,
     managementFeeManualInput,

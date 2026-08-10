@@ -136,6 +136,14 @@ export function calcSettlementForRevision(
         nickname: a.nickname,
         ratioBp: a.ratioBp,
       })),
+      policyVersionMeta:
+        snap.policyVersionId && snap.policyVersion != null && snap.policyEffectiveFrom
+          ? {
+              policyVersionId: snap.policyVersionId,
+              policyVersion: snap.policyVersion,
+              policyEffectiveFrom: snap.policyEffectiveFrom,
+            }
+          : undefined,
     })
   }
 

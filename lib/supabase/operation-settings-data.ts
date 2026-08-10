@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type {
   ActiveMemberOption,
-  GuildOperationSettingLog,
+  GuildOperationPolicyView,
   GuildOperationSettings,
   PolicyAmountMode,
 } from "@/lib/operation-settings-types"
@@ -10,41 +10,60 @@ import {
   isValidPolicyAmountMode,
   validateOperationSettingsInput,
 } from "@/lib/operation-settings-utils"
+import { isEffectiveFromAllowedForNewPolicy } from "@/lib/operation-policy-kst-utils"
+import {
+  buildPolicySnapshotV1,
+  canCancelPolicyVersion,
+  financeSettingsFromSnapshot,
+  getCurrentPolicyVersion,
+  getNextScheduledPolicyVersion,
+  parsePolicySnapshotPayload,
+  selectPolicyVersionForOccurredAt,
+  type GuildOperationPolicyVersion,
+} from "@/lib/operation-policy-version-utils"
 import { requireActiveMembersInActorGuild } from "@/lib/supabase/guild-scope-helpers"
 
-type SettingsRow = {
+type VersionRow = {
+  id: string
   guild_id: string
-  management_fee_mode: string
-  management_fee_percentage: number | string | null
-  reserve_mode: string
-  reserve_percentage: number | string | null
-  updated_at: string | null
+  version: number
+  effective_from: string
+  created_at: string
+  created_by: string | null
+  change_reason: string
+  policy_snapshot: unknown
+  cancelled_at: string | null
+  cancelled_by: string | null
+  cancel_reason: string | null
 }
 
-type AllocationRow = {
-  member_id: string
-  ratio_bp: number
-}
-
-function mapSettingsRow(
-  row: SettingsRow | null,
-  allocations: Array<{ memberId: string; nickname: string; ratioBp: number }>,
-): GuildOperationSettings {
-  if (!row) {
-    return {
-      ...DEFAULT_GUILD_OPERATION_SETTINGS,
-      updatedAt: null,
-    }
-  }
-
+function mapVersionRow(row: VersionRow): GuildOperationPolicyVersion | null {
+  const policySnapshot = parsePolicySnapshotPayload(row.policy_snapshot)
+  if (!policySnapshot) return null
   return {
-    managementFeeMode: row.management_fee_mode as PolicyAmountMode,
-    managementFeePercentage:
-      row.management_fee_percentage != null ? Number(row.management_fee_percentage) : null,
-    reserveMode: row.reserve_mode as PolicyAmountMode,
-    reservePercentage: row.reserve_percentage != null ? Number(row.reserve_percentage) : null,
-    allocations,
-    updatedAt: row.updated_at,
+    id: row.id,
+    guildId: row.guild_id,
+    version: row.version,
+    effectiveFrom: row.effective_from,
+    createdAt: row.created_at,
+    createdBy: row.created_by,
+    changeReason: row.change_reason,
+    policySnapshot,
+    cancelledAt: row.cancelled_at,
+    cancelledBy: row.cancelled_by,
+    cancelReason: row.cancel_reason,
+  }
+}
+
+function toSummary(v: GuildOperationPolicyVersion): GuildOperationPolicyView["currentPolicy"] {
+  return {
+    id: v.id,
+    version: v.version,
+    effectiveFrom: v.effectiveFrom,
+    createdAt: v.createdAt,
+    changeReason: v.changeReason,
+    cancelledAt: v.cancelledAt,
+    policySnapshot: v.policySnapshot,
   }
 }
 
@@ -72,73 +91,66 @@ export async function fetchActiveGuildMembers(
   }))
 }
 
+export async function fetchGuildOperationPolicyVersions(
+  admin: SupabaseClient,
+  guildId: string,
+): Promise<GuildOperationPolicyVersion[]> {
+  const { data, error } = await admin
+    .from("guild_operation_policy_versions")
+    .select("*")
+    .eq("guild_id", guildId)
+    .order("effective_from", { ascending: false })
+    .order("version", { ascending: false })
+
+  if (error) {
+    console.error("[fetchGuildOperationPolicyVersions]", error)
+    return []
+  }
+
+  return ((data ?? []) as VersionRow[])
+    .map(mapVersionRow)
+    .filter((v): v is GuildOperationPolicyVersion => v != null)
+}
+
+export async function fetchGuildOperationPolicyView(
+  admin: SupabaseClient,
+  guildId: string,
+  occurredAtIso?: string,
+): Promise<GuildOperationPolicyView> {
+  const [versions, members] = await Promise.all([
+    fetchGuildOperationPolicyVersions(admin, guildId),
+    fetchActiveGuildMembers(admin, guildId),
+  ])
+  const nameById = new Map(members.map((m) => [m.id, m.nickname]))
+  const nowIso = new Date().toISOString()
+  const current = getCurrentPolicyVersion(versions, nowIso)
+  const nextScheduled = getNextScheduledPolicyVersion(versions, nowIso)
+  const atOccurred = occurredAtIso
+    ? selectPolicyVersionForOccurredAt(versions, occurredAtIso)
+    : current
+
+  const settings = atOccurred
+    ? financeSettingsFromSnapshot(atOccurred.policySnapshot, nameById)
+    : { ...DEFAULT_GUILD_OPERATION_SETTINGS, updatedAt: null }
+
+  return {
+    currentPolicy: current ? toSummary(current) : null,
+    nextScheduledPolicy: nextScheduled ? toSummary(nextScheduled) : null,
+    settings,
+    versions: versions.map(toSummary).filter((v): v is NonNullable<typeof v> => v != null),
+  }
+}
+
+/** @deprecated use fetchGuildOperationPolicyView — 현재 시각 기준 settings */
 export async function fetchGuildOperationSettings(
   admin: SupabaseClient,
   guildId: string,
 ): Promise<GuildOperationSettings> {
-  const [settingsRes, allocRes, members] = await Promise.all([
-    admin.from("guild_operation_settings").select("*").eq("guild_id", guildId).maybeSingle(),
-    admin
-      .from("guild_management_fee_allocations")
-      .select("member_id, ratio_bp")
-      .eq("guild_id", guildId),
-    fetchActiveGuildMembers(admin, guildId),
-  ])
-
-  if (settingsRes.error) {
-    console.error("[fetchGuildOperationSettings]", settingsRes.error)
-  }
-  if (allocRes.error) {
-    console.error("[fetchGuildOperationSettings/alloc]", allocRes.error)
-  }
-
-  const nameById = new Map(members.map((m) => [m.id, m.nickname]))
-  const allocations = ((allocRes.data ?? []) as AllocationRow[]).map((a) => ({
-    memberId: a.member_id,
-    nickname: nameById.get(a.member_id) ?? "혈원",
-    ratioBp: a.ratio_bp,
-  }))
-
-  return mapSettingsRow((settingsRes.data as SettingsRow | null) ?? null, allocations)
+  const view = await fetchGuildOperationPolicyView(admin, guildId)
+  return view.settings
 }
 
-export async function fetchGuildOperationSettingLogs(
-  admin: SupabaseClient,
-  guildId: string,
-  limit = 30,
-): Promise<GuildOperationSettingLog[]> {
-  const { data, error } = await admin
-    .from("guild_operation_setting_logs")
-    .select("*")
-    .eq("guild_id", guildId)
-    .order("created_at", { ascending: false })
-    .limit(limit)
-
-  if (error) {
-    console.error("[fetchGuildOperationSettingLogs]", error)
-    return []
-  }
-
-  return (data ?? []).map(
-    (row: {
-      id: string
-      previous_snapshot: Record<string, unknown>
-      new_snapshot: Record<string, unknown>
-      reason: string
-      created_by: string | null
-      created_at: string
-    }) => ({
-      id: row.id,
-      previousSnapshot: row.previous_snapshot ?? {},
-      newSnapshot: row.new_snapshot ?? {},
-      reason: row.reason,
-      createdBy: row.created_by,
-      createdAt: row.created_at,
-    }),
-  )
-}
-
-export async function updateGuildOperationSettingsOnServer(
+export async function createGuildOperationPolicyVersionOnServer(
   admin: SupabaseClient,
   actorId: string,
   guildId: string,
@@ -148,10 +160,17 @@ export async function updateGuildOperationSettingsOnServer(
     reserveMode: PolicyAmountMode
     reservePercentage: number | null
     allocations: Array<{ memberId: string; ratioBp: number }>
-    reason: string
+    changeReason: string
+    effectiveFromIso: string
+    allowPastEffectiveFrom?: boolean
   },
-): Promise<{ ok: true; settings: GuildOperationSettings } | { ok: false; message: string }> {
-  if (!input.reason.trim()) {
+): Promise<
+  { ok: true; view: GuildOperationPolicyView; version: GuildOperationPolicyVersion } | {
+      ok: false
+      message: string
+    }
+> {
+  if (!input.changeReason.trim()) {
     return { ok: false, message: "변경 사유를 입력해주세요." }
   }
 
@@ -170,6 +189,13 @@ export async function updateGuildOperationSettingsOnServer(
     return validation
   }
 
+  if (!input.allowPastEffectiveFrom && !isEffectiveFromAllowedForNewPolicy(input.effectiveFromIso)) {
+    return {
+      ok: false,
+      message: "시행 시각은 현재 시각 이후여야 합니다. 과거 활동에 소급 적용할 수 없습니다.",
+    }
+  }
+
   if (input.managementFeeMode !== "none" && input.allocations.length > 0) {
     const scope = await requireActiveMembersInActorGuild(
       admin,
@@ -181,64 +207,121 @@ export async function updateGuildOperationSettingsOnServer(
     }
   }
 
-  const previous = await fetchGuildOperationSettings(admin, guildId)
+  const { data: maxRow } = await admin
+    .from("guild_operation_policy_versions")
+    .select("version")
+    .eq("guild_id", guildId)
+    .order("version", { ascending: false })
+    .limit(1)
+    .maybeSingle()
 
-  const { error: upsertError } = await admin.from("guild_operation_settings").upsert({
-    guild_id: guildId,
-    management_fee_mode: input.managementFeeMode,
-    management_fee_percentage:
-      input.managementFeeMode === "percentage" ? input.managementFeePercentage : null,
-    reserve_mode: input.reserveMode,
-    reserve_percentage: input.reserveMode === "percentage" ? input.reservePercentage : null,
-    updated_at: new Date().toISOString(),
+  const nextVersion = Number(maxRow?.version ?? 0) + 1
+  const policySnapshot = buildPolicySnapshotV1({
+    managementFeeMode: input.managementFeeMode,
+    managementFeePercentage: input.managementFeePercentage,
+    reserveMode: input.reserveMode,
+    reservePercentage: input.reservePercentage,
+    allocations: input.allocations,
   })
 
-  if (upsertError) {
-    console.error("[updateGuildOperationSettingsOnServer]", upsertError)
-    return { ok: false, message: "운영 정책 저장에 실패했습니다." }
+  const { data, error } = await admin
+    .from("guild_operation_policy_versions")
+    .insert({
+      guild_id: guildId,
+      version: nextVersion,
+      effective_from: input.effectiveFromIso,
+      created_by: actorId,
+      change_reason: input.changeReason.trim(),
+      policy_snapshot: policySnapshot,
+    })
+    .select("*")
+    .single()
+
+  if (error || !data) {
+    console.error("[createGuildOperationPolicyVersionOnServer]", error)
+    return { ok: false, message: "운영 정책 version 저장에 실패했습니다." }
   }
 
-  await admin.from("guild_management_fee_allocations").delete().eq("guild_id", guildId)
+  const mapped = mapVersionRow(data as VersionRow)
+  if (!mapped) {
+    return { ok: false, message: "정책 snapshot 형식이 올바르지 않습니다." }
+  }
 
-  if (input.managementFeeMode !== "none" && input.allocations.length > 0) {
-    const { error: allocError } = await admin.from("guild_management_fee_allocations").insert(
-      input.allocations.map((a) => ({
-        guild_id: guildId,
-        member_id: a.memberId,
-        ratio_bp: a.ratioBp,
-      })),
-    )
-    if (allocError) {
-      console.error("[updateGuildOperationSettingsOnServer/alloc]", allocError)
-      return { ok: false, message: "관리비 배분 설정 저장에 실패했습니다." }
+  const view = await fetchGuildOperationPolicyView(admin, guildId)
+  return { ok: true, view, version: mapped }
+}
+
+export async function cancelScheduledPolicyVersionOnServer(
+  admin: SupabaseClient,
+  actorId: string,
+  guildId: string,
+  versionId: string,
+  cancelReason: string,
+): Promise<{ ok: true; view: GuildOperationPolicyView } | { ok: false; message: string }> {
+  if (!cancelReason.trim()) {
+    return { ok: false, message: "취소 사유를 입력해주세요." }
+  }
+
+  const { data, error } = await admin
+    .from("guild_operation_policy_versions")
+    .select("*")
+    .eq("id", versionId)
+    .eq("guild_id", guildId)
+    .maybeSingle()
+
+  if (error || !data) {
+    return { ok: false, message: "정책 version을 찾을 수 없습니다." }
+  }
+
+  const version = mapVersionRow(data as VersionRow)
+  if (!version) {
+    return { ok: false, message: "정책 snapshot이 올바르지 않습니다." }
+  }
+
+  if (!canCancelPolicyVersion(version)) {
+    return {
+      ok: false,
+      message: "이미 시행된 정책은 취소할 수 없습니다. 예약 정책만 취소 가능합니다.",
     }
   }
 
-  const settings = await fetchGuildOperationSettings(admin, guildId)
-
-  const { error: logError } = await admin.from("guild_operation_setting_logs").insert({
-    guild_id: guildId,
-    previous_snapshot: previous,
-    new_snapshot: settings,
-    reason: input.reason.trim(),
-    created_by: actorId,
-  })
-  if (logError) {
-    console.error("[updateGuildOperationSettingsOnServer/log]", logError)
+  if (version.cancelledAt) {
+    return { ok: false, message: "이미 취소된 예약 정책입니다." }
   }
 
-  return { ok: true, settings }
+  const { error: updateError } = await admin
+    .from("guild_operation_policy_versions")
+    .update({
+      cancelled_at: new Date().toISOString(),
+      cancelled_by: actorId,
+      cancel_reason: cancelReason.trim(),
+    })
+    .eq("id", versionId)
+    .eq("guild_id", guildId)
+    .is("cancelled_at", null)
+
+  if (updateError) {
+    console.error("[cancelScheduledPolicyVersionOnServer]", updateError)
+    return { ok: false, message: "예약 정책 취소에 실패했습니다." }
+  }
+
+  const view = await fetchGuildOperationPolicyView(admin, guildId)
+  return { ok: true, view }
 }
 
 export async function resolveSettlementPolicyInputs(
   admin: SupabaseClient,
   guildId: string,
+  occurredAtIso: string,
   totalRevenue: number,
   reserveManualInput: number,
   managementFeeManualInput: number,
 ): Promise<
   | {
       ok: true
+      policyVersionId: string
+      policyVersion: number
+      policyEffectiveFrom: string
       reserveMode: PolicyAmountMode
       reservePercentage: number | null
       reserveManualInput: number
@@ -249,7 +332,15 @@ export async function resolveSettlementPolicyInputs(
     }
   | { ok: false; message: string }
 > {
-  const settings = await fetchGuildOperationSettings(admin, guildId)
+  const versions = await fetchGuildOperationPolicyVersions(admin, guildId)
+  const selected = selectPolicyVersionForOccurredAt(versions, occurredAtIso)
+  if (!selected) {
+    return { ok: false, message: "해당 시점에 적용할 운영 정책이 없습니다." }
+  }
+
+  const members = await fetchActiveGuildMembers(admin, guildId)
+  const nameById = new Map(members.map((m) => [m.id, m.nickname]))
+  const settings = financeSettingsFromSnapshot(selected.policySnapshot, nameById)
 
   if (settings.reserveMode === "manual_per_settlement") {
     if (reserveManualInput < 0 || reserveManualInput > totalRevenue) {
@@ -278,6 +369,9 @@ export async function resolveSettlementPolicyInputs(
 
   return {
     ok: true,
+    policyVersionId: selected.id,
+    policyVersion: selected.version,
+    policyEffectiveFrom: selected.effectiveFrom,
     reserveMode: settings.reserveMode,
     reservePercentage: settings.reservePercentage,
     reserveManualInput:

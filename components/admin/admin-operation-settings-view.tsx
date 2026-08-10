@@ -7,8 +7,7 @@ import type { AdminNavState } from "@/components/admin/admin-types"
 import { initialDataNav } from "@/components/admin/admin-nav-helpers"
 import type {
   ActiveMemberOption,
-  GuildOperationSettingLog,
-  GuildOperationSettings,
+  GuildOperationPolicyView,
   PolicyAmountMode,
 } from "@/lib/operation-settings-types"
 import {
@@ -17,6 +16,7 @@ import {
   RESERVE_MODE_LABELS,
 } from "@/lib/operation-settings-types"
 import { MEMBER_ROLE_LABELS } from "@/lib/member-types"
+import { formatKstDateTimeLabel } from "@/lib/operation-policy-kst-utils"
 
 type Props = {
   onNavigate: (nav: AdminNavState) => void
@@ -28,46 +28,57 @@ type AllocationDraft = {
   ratioBp: string
 }
 
+function policyFinanceLabel(view: GuildOperationPolicyView["currentPolicy"]): string {
+  if (!view) return "정책 없음"
+  const f = view.policySnapshot.finance
+  const mgmt =
+    f.managementFeeMode === "percentage"
+      ? `관리비 ${f.managementFeePercentage}%`
+      : POLICY_AMOUNT_MODE_LABELS[f.managementFeeMode]
+  const reserve =
+    f.reserveMode === "percentage"
+      ? `비축 ${f.reservePercentage}%`
+      : RESERVE_MODE_LABELS[f.reserveMode]
+  return `${mgmt} · ${reserve}`
+}
+
 export function AdminOperationSettingsView({ onNavigate }: Props) {
-  const [settings, setSettings] = useState<GuildOperationSettings | null>(null)
+  const [policyView, setPolicyView] = useState<GuildOperationPolicyView | null>(null)
   const [activeMembers, setActiveMembers] = useState<ActiveMemberOption[]>([])
-  const [logs, setLogs] = useState<GuildOperationSettingLog[]>([])
   const [managementFeeMode, setManagementFeeMode] = useState<PolicyAmountMode>("none")
   const [managementFeePercentage, setManagementFeePercentage] = useState("")
   const [reserveMode, setReserveMode] = useState<PolicyAmountMode>("manual_per_settlement")
   const [reservePercentage, setReservePercentage] = useState("")
   const [allocations, setAllocations] = useState<AllocationDraft[]>([])
-  const [reason, setReason] = useState("")
+  const [changeReason, setChangeReason] = useState("")
+  const [effectiveFromMode, setEffectiveFromMode] = useState<"now" | "scheduled">("now")
+  const [effectiveFromDate, setEffectiveFromDate] = useState("")
+  const [effectiveFromTime, setEffectiveFromTime] = useState("00:00")
   const [saving, setSaving] = useState(false)
 
   const load = useCallback(async () => {
-    const res = await fetch("/api/admin/operation-settings?logs=1")
+    const res = await fetch("/api/admin/operation-settings")
     const data = (await res.json()) as {
       ok: boolean
-      settings?: GuildOperationSettings
+      policyView?: GuildOperationPolicyView
       activeMembers?: ActiveMemberOption[]
-      logs?: GuildOperationSettingLog[]
       message?: string
     }
-    if (!data.ok || !data.settings) {
+    if (!data.ok || !data.policyView) {
       alert(data.message ?? "운영 정책을 불러오지 못했습니다.")
       return
     }
-    setSettings(data.settings)
+    setPolicyView(data.policyView)
     setActiveMembers(data.activeMembers ?? [])
-    setLogs(data.logs ?? [])
-    setManagementFeeMode(data.settings.managementFeeMode)
+    const s = data.policyView.settings
+    setManagementFeeMode(s.managementFeeMode)
     setManagementFeePercentage(
-      data.settings.managementFeePercentage != null
-        ? String(data.settings.managementFeePercentage)
-        : "",
+      s.managementFeePercentage != null ? String(s.managementFeePercentage) : "",
     )
-    setReserveMode(data.settings.reserveMode)
-    setReservePercentage(
-      data.settings.reservePercentage != null ? String(data.settings.reservePercentage) : "",
-    )
+    setReserveMode(s.reserveMode)
+    setReservePercentage(s.reservePercentage != null ? String(s.reservePercentage) : "")
     setAllocations(
-      data.settings.allocations.map((a) => ({
+      s.allocations.map((a) => ({
         memberId: a.memberId,
         nickname: a.nickname,
         ratioBp: String(a.ratioBp),
@@ -99,17 +110,12 @@ export function AdminOperationSettingsView({ onNavigate }: Props) {
   }
 
   async function handleSave() {
-    if (!reason.trim()) {
-      alert("변경 사유를 입력해주세요.")
-      return
-    }
-
     setSaving(true)
     const res = await fetch("/api/admin/operation-settings/mutate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        action: "update_settings",
+        action: "create_version",
         managementFeeMode,
         managementFeePercentage:
           managementFeeMode === "percentage" ? Number(managementFeePercentage) : null,
@@ -119,16 +125,36 @@ export function AdminOperationSettingsView({ onNavigate }: Props) {
           memberId: a.memberId,
           ratioBp: parseInt(a.ratioBp, 10) || 0,
         })),
-        reason: reason.trim(),
+        changeReason,
+        effectiveFromMode,
+        effectiveFromDate: effectiveFromMode === "scheduled" ? effectiveFromDate : undefined,
+        effectiveFromTime: effectiveFromMode === "scheduled" ? effectiveFromTime : undefined,
       }),
     })
     const data = (await res.json()) as { ok: boolean; message: string }
     setSaving(false)
     alert(data.message)
     if (data.ok) {
-      setReason("")
+      setChangeReason("")
       await load()
     }
+  }
+
+  async function handleCancelScheduled(versionId: string) {
+    const cancelReason = window.prompt("예약 정책 취소 사유를 입력하세요.")
+    if (!cancelReason?.trim()) return
+    const res = await fetch("/api/admin/operation-settings/mutate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "cancel_scheduled_version",
+        versionId,
+        cancelReason: cancelReason.trim(),
+      }),
+    })
+    const data = (await res.json()) as { ok: boolean; message: string }
+    alert(data.message)
+    if (data.ok) await load()
   }
 
   return (
@@ -143,9 +169,47 @@ export function AdminOperationSettingsView({ onNavigate }: Props) {
 
       <SectionTitle>운영 정책</SectionTitle>
       <p className="mb-4 text-xs text-muted-foreground">
-        설정 변경은 이후 신규 정산부터 즉시 적용됩니다. 기존 정산은 생성 시점 snapshot이
-        유지됩니다. 관리비 수령 대상 지정은 role/permission을 변경하지 않습니다.
+        정책은 event occurred_at 기준으로 적용됩니다. 저장 시각(created_at)과 시행
+        시각(effective_from)은 별개이며, 과거 시행 시각으로의 소급 등록은 불가합니다.
       </p>
+
+      <div className="mb-4 grid gap-3 md:grid-cols-2">
+        <Card className="space-y-1 p-4 text-sm">
+          <p className="text-xs font-medium text-muted-foreground">현재 적용 정책</p>
+          {policyView?.currentPolicy ? (
+            <>
+              <p className="font-semibold">{policyFinanceLabel(policyView.currentPolicy)}</p>
+              <p className="text-xs text-muted-foreground">
+                v{policyView.currentPolicy.version} · 시행{" "}
+                {formatKstDateTimeLabel(policyView.currentPolicy.effectiveFrom)}
+              </p>
+            </>
+          ) : (
+            <p className="text-muted-foreground">없음</p>
+          )}
+        </Card>
+        <Card className="space-y-1 p-4 text-sm">
+          <p className="text-xs font-medium text-muted-foreground">다음 예약 정책</p>
+          {policyView?.nextScheduledPolicy ? (
+            <>
+              <p className="font-semibold">{policyFinanceLabel(policyView.nextScheduledPolicy)}</p>
+              <p className="text-xs text-muted-foreground">
+                v{policyView.nextScheduledPolicy.version} · 시행{" "}
+                {formatKstDateTimeLabel(policyView.nextScheduledPolicy.effectiveFrom)}
+              </p>
+              <button
+                type="button"
+                onClick={() => void handleCancelScheduled(policyView.nextScheduledPolicy!.id)}
+                className="mt-2 text-xs text-destructive"
+              >
+                예약 취소
+              </button>
+            </>
+          ) : (
+            <p className="text-muted-foreground">없음</p>
+          )}
+        </Card>
+      </div>
 
       <Card className="mb-4 flex flex-col gap-4">
         <ModeField
@@ -161,7 +225,6 @@ export function AdminOperationSettingsView({ onNavigate }: Props) {
             onChange={setManagementFeePercentage}
           />
         )}
-
         <ModeField
           label="혈맹자금 비축 방식"
           value={reserveMode}
@@ -190,7 +253,6 @@ export function AdminOperationSettingsView({ onNavigate }: Props) {
               현재 합계: {ratioSum}bp
             </p>
           </div>
-
           {allocations.map((a) => (
             <div key={a.memberId} className="flex items-center gap-2">
               <span className="min-w-0 flex-1 truncate text-sm">{a.nickname}</span>
@@ -220,7 +282,6 @@ export function AdminOperationSettingsView({ onNavigate }: Props) {
               </button>
             </div>
           ))}
-
           <div className="border-t border-border pt-3">
             <p className="mb-2 text-xs font-medium text-muted-foreground">수령 대상 추가</p>
             <div className="flex max-h-40 flex-col gap-1 overflow-y-auto">
@@ -246,13 +307,50 @@ export function AdminOperationSettingsView({ onNavigate }: Props) {
       )}
 
       <Card className="mb-4 flex flex-col gap-3">
+        <div>
+          <p className="mb-2 text-xs font-medium text-muted-foreground">시행 시각 (KST)</p>
+          <div className="flex flex-col gap-2">
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="radio"
+                checked={effectiveFromMode === "now"}
+                onChange={() => setEffectiveFromMode("now")}
+              />
+              지금부터 적용
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="radio"
+                checked={effectiveFromMode === "scheduled"}
+                onChange={() => setEffectiveFromMode("scheduled")}
+              />
+              지정한 날짜/시간부터 적용
+            </label>
+          </div>
+          {effectiveFromMode === "scheduled" && (
+            <div className="mt-3 flex gap-2">
+              <input
+                type="date"
+                value={effectiveFromDate}
+                onChange={(e) => setEffectiveFromDate(e.target.value)}
+                className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
+              />
+              <input
+                type="time"
+                value={effectiveFromTime}
+                onChange={(e) => setEffectiveFromTime(e.target.value)}
+                className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
+              />
+            </div>
+          )}
+        </div>
         <label className="text-xs font-medium text-muted-foreground">변경 사유</label>
         <input
           type="text"
-          value={reason}
-          onChange={(e) => setReason(e.target.value)}
+          value={changeReason}
+          onChange={(e) => setChangeReason(e.target.value)}
           className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
-          placeholder="예: 관리비 10% 및 배분 비율 조정"
+          placeholder="예: 9/1부터 관리비 7%로 변경"
         />
         <button
           type="button"
@@ -260,25 +358,25 @@ export function AdminOperationSettingsView({ onNavigate }: Props) {
           disabled={saving}
           className="rounded-xl bg-primary py-2.5 text-sm font-semibold text-primary-foreground disabled:opacity-50"
         >
-          {saving ? "저장 중..." : "저장"}
+          {saving ? "저장 중..." : "정책 version 등록"}
         </button>
-        {settings?.updatedAt && (
-          <p className="text-[10px] text-muted-foreground">
-            마지막 저장: {new Date(settings.updatedAt).toLocaleString("ko-KR")}
-          </p>
-        )}
       </Card>
 
-      <SectionTitle>변경 이력</SectionTitle>
+      <SectionTitle>정책 version 이력</SectionTitle>
       <div className="flex flex-col gap-2">
-        {logs.length === 0 && (
-          <Card className="py-6 text-center text-xs text-muted-foreground">변경 이력 없음</Card>
+        {(policyView?.versions ?? []).length === 0 && (
+          <Card className="py-6 text-center text-xs text-muted-foreground">이력 없음</Card>
         )}
-        {logs.map((log) => (
-          <Card key={log.id} className="py-3 text-xs">
-            <p className="font-medium">{log.reason}</p>
-            <p className="mt-1 text-muted-foreground">
-              {new Date(log.createdAt).toLocaleString("ko-KR")}
+        {(policyView?.versions ?? []).map((v) => (
+          <Card key={v.id} className="py-3 text-xs">
+            <p className="font-medium">
+              v{v.version} · {policyFinanceLabel(v)}
+              {v.cancelledAt ? " (취소됨)" : ""}
+            </p>
+            <p className="mt-1 text-muted-foreground">{v.changeReason}</p>
+            <p className="mt-1 text-[10px] text-muted-foreground">
+              시행 {formatKstDateTimeLabel(v.effectiveFrom)} · 등록{" "}
+              {formatKstDateTimeLabel(v.createdAt)}
             </p>
           </Card>
         ))}

@@ -75,6 +75,11 @@ export type SettlementWithPolicyInput = {
   managementFeePercentage: number | null
   managementFeeManualInput: number
   allocations: Array<{ memberId: string; nickname: string; ratioBp: number }>
+  policyVersionMeta?: {
+    policyVersionId: string
+    policyVersion: number
+    policyEffectiveFrom: string
+  }
 }
 
 export type SettlementWithPolicyResult = {
@@ -138,6 +143,9 @@ export function calcSettlementWithPolicy(input: SettlementWithPolicyInput): Sett
   const { ledgerAmount, subThousand } = guildShareLedgerAndSub(guildShareFinal)
 
   const operationPolicySnapshot: OperationPolicySnapshot = {
+    policyVersionId: input.policyVersionMeta?.policyVersionId,
+    policyVersion: input.policyVersionMeta?.policyVersion,
+    policyEffectiveFrom: input.policyVersionMeta?.policyEffectiveFrom,
     reserveMode: input.reserveMode,
     reservePercentage: input.reservePercentage,
     reserveManualInput: input.reserveManualInput,

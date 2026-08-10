@@ -6,8 +6,7 @@ import { requireManagerOrAdmin } from "@/lib/supabase/operation-auth"
 import { actorGuildId } from "@/lib/supabase/guild-scope-helpers"
 import {
   fetchActiveGuildMembers,
-  fetchGuildOperationSettingLogs,
-  fetchGuildOperationSettings,
+  fetchGuildOperationPolicyView,
 } from "@/lib/supabase/operation-settings-data"
 
 export async function GET(request: Request) {
@@ -32,22 +31,19 @@ export async function GET(request: Request) {
     const admin = createAdminClient()
     const guildId = actorGuildId(authResult.member)
     const url = new URL(request.url)
-    const includeLogs = url.searchParams.get("logs") === "1"
+    const occurredAt = url.searchParams.get("occurredAt") ?? undefined
     const isAdmin = authResult.member.role === "admin"
 
-    const [settings, activeMembers, logs] = await Promise.all([
-      fetchGuildOperationSettings(admin, guildId),
+    const [policyView, activeMembers] = await Promise.all([
+      fetchGuildOperationPolicyView(admin, guildId, occurredAt),
       isAdmin ? fetchActiveGuildMembers(admin, guildId) : Promise.resolve([]),
-      isAdmin && includeLogs
-        ? fetchGuildOperationSettingLogs(admin, guildId)
-        : Promise.resolve([]),
     ])
 
     return NextResponse.json({
       ok: true,
-      settings,
+      policyView,
+      settings: policyView.settings,
       activeMembers: isAdmin ? activeMembers : undefined,
-      logs: isAdmin && includeLogs ? logs : undefined,
       canEdit: isAdmin,
     })
   } catch (error) {

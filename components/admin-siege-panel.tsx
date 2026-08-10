@@ -30,6 +30,7 @@ import {
 } from "@/components/admin/settlement-revision-ui"
 import { SettlementRoundingPreview } from "@/components/admin/settlement-rounding-preview"
 import { useGuildOperationSettings } from "@/components/admin/use-guild-operation-settings"
+import { siegeEventOccurredAtIso } from "@/lib/event-occurred-at-utils"
 import { calcSettlementPreview } from "@/lib/settlement-preview-utils"
 import type { SettlementCalcResult } from "@/lib/settlement-utils"
 import { formatWon } from "@/lib/guild-data"
@@ -112,7 +113,13 @@ export function AdminSiegePanel({ siegeId: controlledSiegeId, embedded = false }
   const [managementFee, setManagementFee] = useState("")
   const [settlementMemo, setSettlementMemo] = useState("")
   const [settlementFeedback, setSettlementFeedback] = useState<string | null>(null)
-  const { settings: operationSettings } = useGuildOperationSettings()
+
+  const selectedSiege = getSiege(selectedSiegeId)
+  const siegeOccurredAtIso = useMemo(() => {
+    if (!selectedSiege) return null
+    return siegeEventOccurredAtIso(selectedSiege.eventDate, selectedSiege.startTime)
+  }, [selectedSiege])
+  const { settings: operationSettings } = useGuildOperationSettings(siegeOccurredAtIso)
 
   const [modifyModal, setModifyModal] = useState<{
     memberId: string
@@ -122,7 +129,6 @@ export function AdminSiegePanel({ siegeId: controlledSiegeId, embedded = false }
   } | null>(null)
   const [modifyReason, setModifyReason] = useState("")
 
-  const selectedSiege = getSiege(selectedSiegeId)
   const surveyStats = selectedSiege ? getSurveyStats(selectedSiege.id) : null
   const settlement = selectedSiege ? getSiegeSettlement(selectedSiege.id) : null
   const summary = selectedSiege ? getSettlementSummary("siege", selectedSiege.id) : null

@@ -14,6 +14,7 @@ import { formatWon } from "@/lib/guild-data"
 import { generateDaySlots } from "@/lib/boss-time-slots"
 import { SettlementRoundingPreview } from "@/components/admin/settlement-rounding-preview"
 import { useGuildOperationSettings } from "@/components/admin/use-guild-operation-settings"
+import { parseSlotIdToOccurredAtIso } from "@/lib/event-occurred-at-utils"
 import { cn } from "@/lib/utils"
 
 type AdminSettlementPanelProps = {
@@ -51,7 +52,11 @@ export function AdminSettlementPanel({ slotId: controlledSlotId, embedded = fals
   const [guildShare, setGuildShare] = useState("")
   const [managementFee, setManagementFee] = useState("")
   const [feedback, setFeedback] = useState<string | null>(null)
-  const { settings: operationSettings } = useGuildOperationSettings()
+  const occurredAtIso = useMemo(
+    () => parseSlotIdToOccurredAtIso(selectedSlotId),
+    [selectedSlotId],
+  )
+  const { settings: operationSettings } = useGuildOperationSettings(occurredAtIso)
   const [modifyModal, setModifyModal] = useState<{
     memberId: string
     name: string
