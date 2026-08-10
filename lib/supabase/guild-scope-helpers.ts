@@ -105,3 +105,40 @@ export async function requireMembersInActorGuild(
 
   return { ok: true }
 }
+
+/** 활동 상태 혈맹원만 — 운영 정책 관리비 수령 대상 검증 */
+export async function requireActiveMembersInActorGuild(
+  admin: SupabaseClient,
+  actorGuildId: string,
+  targetMemberIds: string[],
+): Promise<{ ok: true } | GuildScopeError> {
+  const unique = [...new Set(targetMemberIds.filter(Boolean))]
+  if (unique.length === 0) {
+    return { ok: false, message: "관리비 수령 대상을 선택해주세요.", status: 400 }
+  }
+
+  const { data, error } = await admin
+    .from("members")
+    .select("id, guild_id, status")
+    .eq("guild_id", actorGuildId)
+    .in("id", unique)
+
+  if (error) {
+    return { ok: false, message: "혈맹원을 찾을 수 없습니다.", status: 500 }
+  }
+
+  if ((data?.length ?? 0) !== unique.length) {
+    return { ok: false, message: "다른 혈맹의 혈맹원이 포함되어 있습니다.", status: 403 }
+  }
+
+  const inactive = (data ?? []).find((m: { status: string }) => m.status !== "활동")
+  if (inactive) {
+    return {
+      ok: false,
+      message: "활동 상태 혈맹원만 관리비 수령 대상으로 지정할 수 있습니다.",
+      status: 400,
+    }
+  }
+
+  return { ok: true }
+}

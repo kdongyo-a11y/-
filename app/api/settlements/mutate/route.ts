@@ -33,6 +33,7 @@ type Body = {
   siegeId?: string
   totalRevenue?: number
   guildShareInput?: number
+  managementFeeManualInput?: number
   memo?: string
   memberId?: string
   attendees?: AttendeeInput[]
@@ -106,6 +107,7 @@ export async function POST(request: Request) {
           body.slotId ?? body.sourceId ?? "",
           body.totalRevenue ?? 0,
           body.guildShareInput ?? 0,
+          body.managementFeeManualInput ?? 0,
         )
         return NextResponse.json(result, { status: result.ok ? 200 : 400 })
       }
@@ -119,6 +121,7 @@ export async function POST(request: Request) {
           body.totalRevenue ?? 0,
           body.guildShareInput ?? 0,
           body.memo,
+          body.managementFeeManualInput ?? 0,
         )
         return NextResponse.json(result, { status: result.ok ? 200 : 400 })
       }

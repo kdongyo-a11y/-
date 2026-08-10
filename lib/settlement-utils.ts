@@ -7,6 +7,8 @@ import {
   normalizeMoneyInput,
   subThousandRemainder,
 } from "@/lib/money-utils"
+import type { ManagementFeeAllocation, OperationPolicySnapshot } from "@/lib/operation-settings-types"
+import { calcSettlementWithPolicy } from "@/lib/operation-settings-utils"
 
 export type SettlementCalcInput = {
   totalRevenue: number
@@ -33,6 +35,12 @@ export type SettlementCalcResult = {
   guildShareSubThousand: number
   roundingUnit: number
   roundingPolicy: typeof MONEY_ROUNDING_POLICY
+  /** Phase 9b */
+  managementFeeTotal?: number
+  managementFeeScrap?: number
+  managementSplitScrap?: number
+  managementAllocations?: ManagementFeeAllocation[]
+  operationPolicySnapshot?: OperationPolicySnapshot
 }
 
 export function calcSettlement({
@@ -104,9 +112,33 @@ export function calcSettlementLegacy({
 }
 
 export function calcSettlementForRevision(
-  settlement: { roundingUnit?: number; totalRevenue: number; guildShareInput: number },
+  settlement: {
+    roundingUnit?: number
+    totalRevenue: number
+    guildShareInput: number
+    operationPolicySnapshot?: OperationPolicySnapshot
+  },
   participantCount: number,
 ): SettlementCalcResult {
+  if (settlement.operationPolicySnapshot) {
+    const snap = settlement.operationPolicySnapshot
+    return calcSettlementWithPolicy({
+      totalRevenue: settlement.totalRevenue,
+      participantCount,
+      reserveMode: snap.reserveMode,
+      reservePercentage: snap.reservePercentage,
+      reserveManualInput: snap.reserveManualInput,
+      managementFeeMode: snap.managementFeeMode,
+      managementFeePercentage: snap.managementFeePercentage,
+      managementFeeManualInput: snap.managementFeeManualInput,
+      allocations: snap.managementAllocations.map((a) => ({
+        memberId: a.memberId,
+        nickname: a.nickname,
+        ratioBp: a.ratioBp,
+      })),
+    })
+  }
+
   if (settlement.roundingUnit == null || settlement.roundingUnit <= 1) {
     return calcSettlementLegacy({
       totalRevenue: settlement.totalRevenue,

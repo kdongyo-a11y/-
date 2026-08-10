@@ -1,6 +1,6 @@
 "use client"
 
-import { ChevronRight, Database, Shield, Users, Trophy } from "lucide-react"
+import { ChevronRight, Database, Shield, Users, Trophy, Settings2 } from "lucide-react"
 import { Card, SectionTitle } from "@/components/ui-bits"
 import { AdminBreadcrumb } from "@/components/admin/admin-breadcrumb"
 import type { AdminNavState } from "@/components/admin/admin-types"
@@ -48,6 +48,12 @@ export function AdminInitialDataView({ onNavigate }: Props) {
           title="기여도 점수 설정"
           description="보스/공성 기여도 점수와 적용 시작일을 관리합니다."
           onClick={() => onNavigate(initialDataTabNav("contribution_scores"))}
+        />
+        <MenuCard
+          icon={<Settings2 className="h-4 w-4" />}
+          title="운영 정책"
+          description="관리비·혈맹 비축 산정 방식과 관리비 배분 비율을 설정합니다."
+          onClick={() => onNavigate(initialDataTabNav("operation_policy"))}
         />
       </div>
     </div>

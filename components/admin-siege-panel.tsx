@@ -29,7 +29,9 @@ import {
   SettlementRevisionSummary,
 } from "@/components/admin/settlement-revision-ui"
 import { SettlementRoundingPreview } from "@/components/admin/settlement-rounding-preview"
-import { calcSettlement } from "@/lib/settlement-utils"
+import { useGuildOperationSettings } from "@/components/admin/use-guild-operation-settings"
+import { calcSettlementPreview } from "@/lib/settlement-preview-utils"
+import type { SettlementCalcResult } from "@/lib/settlement-utils"
 import { formatWon } from "@/lib/guild-data"
 import { type RosterMember } from "@/lib/member-types"
 import { getThisWeekSunday, formatSiegeTimeRange } from "@/lib/siege-utils"
@@ -107,8 +109,10 @@ export function AdminSiegePanel({ siegeId: controlledSiegeId, embedded = false }
 
   const [totalRevenue, setTotalRevenue] = useState("")
   const [guildShare, setGuildShare] = useState("")
+  const [managementFee, setManagementFee] = useState("")
   const [settlementMemo, setSettlementMemo] = useState("")
   const [settlementFeedback, setSettlementFeedback] = useState<string | null>(null)
+  const { settings: operationSettings } = useGuildOperationSettings()
 
   const [modifyModal, setModifyModal] = useState<{
     memberId: string
@@ -164,9 +168,16 @@ export function AdminSiegePanel({ siegeId: controlledSiegeId, embedded = false }
   const preview = useMemo(() => {
     const rev = parseInt(totalRevenue.replace(/\D/g, ""), 10) || 0
     const guild = parseInt(guildShare.replace(/\D/g, ""), 10) || 0
+    const mgmt = parseInt(managementFee.replace(/\D/g, ""), 10) || 0
     const count = selectedSiege?.confirmedAttendees.length ?? 0
-    return calcSettlement({ totalRevenue: rev, guildShareInput: guild, participantCount: count })
-  }, [totalRevenue, guildShare, selectedSiege?.confirmedAttendees.length])
+    return calcSettlementPreview({
+      totalRevenue: rev,
+      participantCount: count,
+      reserveManualInput: guild,
+      managementFeeManualInput: mgmt,
+      operationSettings,
+    })
+  }, [totalRevenue, guildShare, managementFee, selectedSiege?.confirmedAttendees.length, operationSettings])
 
   async function handleCreateSiege() {
     const result = await createSiege({
@@ -252,11 +263,19 @@ export function AdminSiegePanel({ siegeId: controlledSiegeId, embedded = false }
     if (!selectedSiege) return
     const rev = parseInt(totalRevenue.replace(/\D/g, ""), 10) || 0
     const guild = parseInt(guildShare.replace(/\D/g, ""), 10) || 0
-    const result = await createSiegeSettlement(selectedSiege.id, rev, guild, settlementMemo)
+    const mgmt = parseInt(managementFee.replace(/\D/g, ""), 10) || 0
+    const result = await createSiegeSettlement(
+      selectedSiege.id,
+      rev,
+      guild,
+      settlementMemo,
+      mgmt,
+    )
     setSettlementFeedback(result.message)
     if (result.ok) {
       setTotalRevenue("")
       setGuildShare("")
+      setManagementFee("")
       setSettlementMemo("")
     }
   }
@@ -768,12 +787,15 @@ export function AdminSiegePanel({ siegeId: controlledSiegeId, embedded = false }
                 <SettlementForm
                   totalRevenue={totalRevenue}
                   guildShare={guildShare}
+                  managementFee={managementFee}
                   settlementMemo={settlementMemo}
                   preview={preview}
                   participantCount={selectedSiege.confirmedAttendees.length}
                   feedback={settlementFeedback}
+                  operationSettings={operationSettings}
                   onRevenueChange={setTotalRevenue}
                   onGuildChange={setGuildShare}
+                  onManagementFeeChange={setManagementFee}
                   onMemoChange={setSettlementMemo}
                   onSubmit={handleCreateSettlement}
                 />
@@ -1080,23 +1102,29 @@ function CreateForm({
 function SettlementForm({
   totalRevenue,
   guildShare,
+  managementFee,
   settlementMemo,
   preview,
   participantCount,
   feedback,
+  operationSettings,
   onRevenueChange,
   onGuildChange,
+  onManagementFeeChange,
   onMemoChange,
   onSubmit,
 }: {
   totalRevenue: string
   guildShare: string
+  managementFee: string
   settlementMemo: string
-  preview: ReturnType<typeof calcSettlement>
+  preview: SettlementCalcResult
   participantCount: number
   feedback: string | null
+  operationSettings: ReturnType<typeof useGuildOperationSettings>["settings"]
   onRevenueChange: (v: string) => void
   onGuildChange: (v: string) => void
+  onManagementFeeChange: (v: string) => void
   onMemoChange: (v: string) => void
   onSubmit: () => void
 }) {
@@ -1113,17 +1141,32 @@ function SettlementForm({
           className="mt-1 w-full rounded-xl border border-border bg-input px-3 py-2.5 font-mono text-sm outline-none focus:border-primary"
         />
       </label>
-      <label className="block">
-        <span className="text-xs font-medium text-muted-foreground">혈맹 귀속금</span>
-        <p className="mt-0.5 text-[10px] text-muted-foreground">1,000원 단위</p>
-        <input
-          type="text"
-          inputMode="numeric"
-          value={guildShare}
-          onChange={(e) => onGuildChange(e.target.value.replace(/\D/g, ""))}
-          className="mt-1 w-full rounded-xl border border-border bg-input px-3 py-2.5 font-mono text-sm outline-none focus:border-primary"
-        />
-      </label>
+      {operationSettings?.reserveMode === "manual_per_settlement" && (
+        <label className="block">
+          <span className="text-xs font-medium text-muted-foreground">혈맹 비축금</span>
+          <p className="mt-0.5 text-[10px] text-muted-foreground">정산마다 직접 입력 · 1,000원 단위</p>
+          <input
+            type="text"
+            inputMode="numeric"
+            value={guildShare}
+            onChange={(e) => onGuildChange(e.target.value.replace(/\D/g, ""))}
+            className="mt-1 w-full rounded-xl border border-border bg-input px-3 py-2.5 font-mono text-sm outline-none focus:border-primary"
+          />
+        </label>
+      )}
+      {operationSettings?.managementFeeMode === "manual_per_settlement" && (
+        <label className="block">
+          <span className="text-xs font-medium text-muted-foreground">관리비 (총액)</span>
+          <p className="mt-0.5 text-[10px] text-muted-foreground">정산마다 직접 입력 · 1,000원 단위</p>
+          <input
+            type="text"
+            inputMode="numeric"
+            value={managementFee}
+            onChange={(e) => onManagementFeeChange(e.target.value.replace(/\D/g, ""))}
+            className="mt-1 w-full rounded-xl border border-border bg-input px-3 py-2.5 font-mono text-sm outline-none focus:border-primary"
+          />
+        </label>
+      )}
       <label className="block">
         <span className="text-xs font-medium text-muted-foreground">메모 (선택)</span>
         <input
@@ -1133,7 +1176,11 @@ function SettlementForm({
           className="mt-1 w-full rounded-xl border border-border bg-input px-3 py-2.5 text-sm outline-none focus:border-primary"
         />
       </label>
-      <SettlementRoundingPreview preview={preview} participantCount={participantCount} />
+      <SettlementRoundingPreview
+        preview={preview}
+        participantCount={participantCount}
+        operationSettings={operationSettings}
+      />
       {feedback && <p className="text-center text-xs text-muted-foreground">{feedback}</p>}
       <button
         type="button"

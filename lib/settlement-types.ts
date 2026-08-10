@@ -1,3 +1,5 @@
+import type { OperationPolicySnapshot } from "@/lib/operation-settings-types"
+
 export type SettlementSourceType = "boss" | "siege"
 
 export type SettlementAdjustmentType =
@@ -116,6 +118,14 @@ export type Settlement = {
   roundingPolicy?: string
   guildShareLedgerAmount?: number
   guildShareSubThousand?: number
+  /** Phase 9b snapshot — null/undefined = legacy (reserve manual only) */
+  operationPolicySnapshot?: OperationPolicySnapshot
+  managementFeeTotal?: number
+  managementFeeManualInput?: number
+  reserveModeApplied?: string
+  reservePercentageApplied?: number | null
+  managementFeeModeApplied?: string
+  managementFeePercentageApplied?: number | null
   participants: SettlementParticipant[]
   revisionSnapshots: SettlementRevisionSnapshot[]
   revisionLogs: SettlementRevisionLog[]

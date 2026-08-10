@@ -9,10 +9,11 @@ import {
   SettlementParticipantRevisionList,
   SettlementRevisionSummary,
 } from "@/components/admin/settlement-revision-ui"
-import { calcSettlement } from "@/lib/settlement-utils"
+import { calcSettlementPreview } from "@/lib/settlement-preview-utils"
 import { formatWon } from "@/lib/guild-data"
 import { generateDaySlots } from "@/lib/boss-time-slots"
 import { SettlementRoundingPreview } from "@/components/admin/settlement-rounding-preview"
+import { useGuildOperationSettings } from "@/components/admin/use-guild-operation-settings"
 import { cn } from "@/lib/utils"
 
 type AdminSettlementPanelProps = {
@@ -48,7 +49,9 @@ export function AdminSettlementPanel({ slotId: controlledSlotId, embedded = fals
   const setSelectedSlotId = controlledSlotId ? () => {} : setInternalSlotId
   const [totalRevenue, setTotalRevenue] = useState("")
   const [guildShare, setGuildShare] = useState("")
+  const [managementFee, setManagementFee] = useState("")
   const [feedback, setFeedback] = useState<string | null>(null)
+  const { settings: operationSettings } = useGuildOperationSettings()
   const [modifyModal, setModifyModal] = useState<{
     memberId: string
     name: string
@@ -73,18 +76,27 @@ export function AdminSettlementPanel({ slotId: controlledSlotId, embedded = fals
   const preview = useMemo(() => {
     const rev = parseInt(totalRevenue.replace(/\D/g, ""), 10) || 0
     const guild = parseInt(guildShare.replace(/\D/g, ""), 10) || 0
+    const mgmt = parseInt(managementFee.replace(/\D/g, ""), 10) || 0
     const count = check?.attendees.length ?? 0
-    return calcSettlement({ totalRevenue: rev, guildShareInput: guild, participantCount: count })
-  }, [totalRevenue, guildShare, check?.attendees.length])
+    return calcSettlementPreview({
+      totalRevenue: rev,
+      participantCount: count,
+      reserveManualInput: guild,
+      managementFeeManualInput: mgmt,
+      operationSettings,
+    })
+  }, [totalRevenue, guildShare, managementFee, check?.attendees.length, operationSettings])
 
   async function handleCreate() {
     const rev = parseInt(totalRevenue.replace(/\D/g, ""), 10) || 0
     const guild = parseInt(guildShare.replace(/\D/g, ""), 10) || 0
-    const result = await createSettlement(selectedSlotId, rev, guild)
+    const mgmt = parseInt(managementFee.replace(/\D/g, ""), 10) || 0
+    const result = await createSettlement(selectedSlotId, rev, guild, mgmt)
     setFeedback(result.message)
     if (result.ok) {
       setTotalRevenue("")
       setGuildShare("")
+      setManagementFee("")
     }
   }
 
@@ -178,22 +190,39 @@ export function AdminSettlementPanel({ slotId: controlledSlotId, embedded = fals
               className="mt-1 w-full rounded-xl border border-border bg-input px-3 py-2.5 font-mono text-sm text-foreground outline-none focus:border-primary focus:ring-1 focus:ring-primary"
             />
           </label>
-          <label className="block">
-            <span className="text-xs font-medium text-muted-foreground">혈맹 귀속금</span>
-            <p className="mt-0.5 text-[10px] text-muted-foreground">1,000원 단위</p>
-            <input
-              type="text"
-              inputMode="numeric"
-              value={guildShare}
-              onChange={(e) => setGuildShare(e.target.value.replace(/\D/g, ""))}
-              placeholder="0"
-              className="mt-1 w-full rounded-xl border border-border bg-input px-3 py-2.5 font-mono text-sm text-foreground outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-            />
-          </label>
+          {operationSettings?.reserveMode === "manual_per_settlement" && (
+            <label className="block">
+              <span className="text-xs font-medium text-muted-foreground">혈맹 비축금</span>
+              <p className="mt-0.5 text-[10px] text-muted-foreground">정산마다 직접 입력 · 1,000원 단위</p>
+              <input
+                type="text"
+                inputMode="numeric"
+                value={guildShare}
+                onChange={(e) => setGuildShare(e.target.value.replace(/\D/g, ""))}
+                placeholder="0"
+                className="mt-1 w-full rounded-xl border border-border bg-input px-3 py-2.5 font-mono text-sm text-foreground outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+              />
+            </label>
+          )}
+          {operationSettings?.managementFeeMode === "manual_per_settlement" && (
+            <label className="block">
+              <span className="text-xs font-medium text-muted-foreground">관리비 (총액)</span>
+              <p className="mt-0.5 text-[10px] text-muted-foreground">정산마다 직접 입력 · 1,000원 단위</p>
+              <input
+                type="text"
+                inputMode="numeric"
+                value={managementFee}
+                onChange={(e) => setManagementFee(e.target.value.replace(/\D/g, ""))}
+                placeholder="0"
+                className="mt-1 w-full rounded-xl border border-border bg-input px-3 py-2.5 font-mono text-sm text-foreground outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+              />
+            </label>
+          )}
 
           <SettlementRoundingPreview
             preview={preview}
             participantCount={check?.attendees.length ?? 0}
+            operationSettings={operationSettings}
           />
 
           {feedback && <p className="text-center text-xs text-muted-foreground">{feedback}</p>}

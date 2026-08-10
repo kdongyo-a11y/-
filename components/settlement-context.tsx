@@ -69,11 +69,13 @@ type SettlementContextValue = {
     totalRevenue: number,
     guildShareInput: number,
     memo?: string,
+    managementFeeManualInput?: number,
   ) => Promise<{ ok: boolean; message: string }>
   createSettlement: (
     slotId: string,
     totalRevenue: number,
     guildShareInput: number,
+    managementFeeManualInput?: number,
   ) => Promise<{ ok: boolean; message: string }>
   reviseSettlement: (
     sourceType: SettlementSourceType,
@@ -388,8 +390,14 @@ export function SettlementProvider({ children }: { children: ReactNode }) {
       slotId: string,
       totalRevenue: number,
       guildShareInput: number,
+      managementFeeManualInput = 0,
     ): Promise<{ ok: boolean; message: string }> => {
-      const result = await settlementApi.createBoss(slotId, totalRevenue, guildShareInput)
+      const result = await settlementApi.createBoss(
+        slotId,
+        totalRevenue,
+        guildShareInput,
+        managementFeeManualInput,
+      )
       if (result.ok) await afterSettlementMutation()
       return result
     },
@@ -402,8 +410,15 @@ export function SettlementProvider({ children }: { children: ReactNode }) {
       totalRevenue: number,
       guildShareInput: number,
       memo = "",
+      managementFeeManualInput = 0,
     ): Promise<{ ok: boolean; message: string }> => {
-      const result = await settlementApi.createSiege(siegeId, totalRevenue, guildShareInput, memo)
+      const result = await settlementApi.createSiege(
+        siegeId,
+        totalRevenue,
+        guildShareInput,
+        memo,
+        managementFeeManualInput,
+      )
       if (result.ok) await afterSettlementMutation()
       return result
     },

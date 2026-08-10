@@ -13,6 +13,7 @@ import { AdminInitialDataView } from "@/components/admin/admin-initial-data-view
 import { AdminOpeningBalanceView } from "@/components/admin/admin-opening-balance-view"
 import { AdminBulkMembersView } from "@/components/admin/admin-bulk-members-view"
 import { AdminContributionSettingsView } from "@/components/admin/admin-contribution-settings-view"
+import { AdminOperationSettingsView } from "@/components/admin/admin-operation-settings-view"
 import { AdminGuildProfileView } from "@/components/admin/admin-guild-profile-view"
 import { AdminDataManagementView } from "@/components/admin/admin-data-management-view"
 import { AdminDataDashboardView } from "@/components/admin/admin-data-dashboard-view"
@@ -91,6 +92,9 @@ export function AdminSectionContent({ nav, onNavigate }: Props) {
       }
       if (tab === "contribution_scores") {
         return <AdminContributionSettingsView onNavigate={onNavigate} />
+      }
+      if (tab === "operation_policy") {
+        return <AdminOperationSettingsView onNavigate={onNavigate} />
       }
       return <AdminInitialDataView onNavigate={onNavigate} />
     }

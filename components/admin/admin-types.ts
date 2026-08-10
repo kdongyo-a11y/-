@@ -15,6 +15,7 @@ export type InitialDataTab =
   | "opening_balance"
   | "bulk_members"
   | "contribution_scores"
+  | "operation_policy"
 
 export type DataManagementTab = "dashboard" | "aggregates" | "export"
 

@@ -3,7 +3,9 @@ import { getTodayDateString } from "@/lib/boss-time-slots"
 import { getSlotConfig, formatSlotTime, getSlotLabel } from "@/lib/boss-time-slots"
 import { parseSlotId } from "@/lib/supabase/boss-mapper"
 import { getBossEventBySlotId } from "@/lib/supabase/boss-event-helpers"
-import { calcSettlement, getGuildShareSubThousand } from "@/lib/settlement-utils"
+import { getGuildShareSubThousand } from "@/lib/settlement-utils"
+import { calcSettlementWithPolicy } from "@/lib/operation-settings-utils"
+import { resolveSettlementPolicyInputs } from "@/lib/supabase/operation-settings-data"
 import {
   computeOverallStatus,
   createInitialParticipant,
@@ -84,6 +86,91 @@ function finalize(settlement: Settlement): Settlement {
   return { ...settlement, overallStatus: computeOverallStatus(settlement.participants) }
 }
 
+async function calcSettlementForCreate(
+  admin: SupabaseClient,
+  guildId: string,
+  totalRevenue: number,
+  guildShareInput: number,
+  managementFeeManualInput: number,
+  participantCount: number,
+) {
+  const policyResult = await resolveSettlementPolicyInputs(
+    admin,
+    guildId,
+    totalRevenue,
+    guildShareInput,
+    managementFeeManualInput,
+  )
+  if (!policyResult.ok) {
+    return policyResult
+  }
+
+  const calc = calcSettlementWithPolicy({
+    totalRevenue,
+    participantCount,
+    reserveMode: policyResult.reserveMode,
+    reservePercentage: policyResult.reservePercentage,
+    reserveManualInput: policyResult.reserveManualInput,
+    managementFeeMode: policyResult.managementFeeMode,
+    managementFeePercentage: policyResult.managementFeePercentage,
+    managementFeeManualInput: policyResult.managementFeeManualInput,
+    allocations: policyResult.allocations,
+  })
+
+  return { ok: true as const, calc, policyResult }
+}
+
+function settlementFromCalc(
+  base: Omit<
+    Settlement,
+    | "totalRevenue"
+    | "guildShareInput"
+    | "guildShareFinal"
+    | "distributableAmount"
+    | "perPersonAmount"
+    | "remainder"
+    | "roundingUnit"
+    | "roundingPolicy"
+    | "guildShareLedgerAmount"
+    | "guildShareSubThousand"
+    | "operationPolicySnapshot"
+    | "managementFeeTotal"
+    | "managementFeeManualInput"
+    | "reserveModeApplied"
+    | "reservePercentageApplied"
+    | "managementFeeModeApplied"
+    | "managementFeePercentageApplied"
+    | "participants"
+    | "overallStatus"
+  >,
+  calc: ReturnType<typeof calcSettlementWithPolicy>,
+  attendees: AttendeeInput[],
+): Settlement {
+  return finalize({
+    ...base,
+    totalRevenue: calc.totalRevenue,
+    guildShareInput: calc.guildShareInput,
+    guildShareFinal: calc.guildShareFinal,
+    distributableAmount: calc.distributableAmount,
+    perPersonAmount: calc.perPersonAmount,
+    remainder: calc.remainder,
+    roundingUnit: calc.roundingUnit,
+    roundingPolicy: calc.roundingPolicy,
+    guildShareLedgerAmount: calc.guildShareLedgerAmount,
+    guildShareSubThousand: calc.guildShareSubThousand,
+    operationPolicySnapshot: calc.operationPolicySnapshot,
+    managementFeeTotal: calc.managementFeeTotal,
+    managementFeeManualInput: calc.operationPolicySnapshot.managementFeeManualInput,
+    reserveModeApplied: calc.operationPolicySnapshot.reserveMode,
+    reservePercentageApplied: calc.operationPolicySnapshot.reservePercentage,
+    managementFeeModeApplied: calc.operationPolicySnapshot.managementFeeMode,
+    managementFeePercentageApplied: calc.operationPolicySnapshot.managementFeePercentage,
+    participants: attendees.map((a) =>
+      createInitialParticipant(a.memberId, a.name, calc.perPersonAmount),
+    ),
+  })
+}
+
 async function fetchBossAttendeesFromDb(
   admin: SupabaseClient,
   slotId: string,
@@ -130,6 +217,7 @@ export async function createBossSettlementOnServer(
   slotId: string,
   totalRevenue: number,
   guildShareInput: number,
+  managementFeeManualInput = 0,
 ): Promise<{ ok: boolean; message: string }> {
   const existing = await getSettlementByKey(admin, guildId, "boss", slotId)
   if (existing) return { ok: false, message: "이미 정산이 생성되었습니다." }
@@ -148,44 +236,39 @@ export async function createBossSettlementOnServer(
   const attendees = attendeeResult.attendees
 
   if (totalRevenue <= 0) return { ok: false, message: "총 수익금을 입력해주세요." }
-  if (guildShareInput < 0 || guildShareInput > totalRevenue) {
-    return { ok: false, message: "혈맹 귀속금이 올바르지 않습니다." }
-  }
   if (attendees.length === 0) return { ok: false, message: "참여자가 없어 정산할 수 없습니다." }
 
-  const calc = calcSettlement({
+  const calcResult = await calcSettlementForCreate(
+    admin,
+    guildId,
     totalRevenue,
     guildShareInput,
-    participantCount: attendees.length,
-  })
+    managementFeeManualInput,
+    attendees.length,
+  )
+  if (!calcResult.ok) return { ok: false, message: calcResult.message }
+  const calc = calcResult.calc
 
   const time = formatSlotTime(parsed.slotHour)
   const label = getSlotLabel(slotConfig.type)
 
-  const settlement: Settlement = finalize({
-    sourceType: "boss",
-    sourceId: slotId,
-    createdAt: Date.now(),
-    revision: 1,
-    overallStatus: "active",
-    totalRevenue: calc.totalRevenue,
-    guildShareInput: calc.guildShareInput,
-    guildShareFinal: calc.guildShareFinal,
-    distributableAmount: calc.distributableAmount,
-    perPersonAmount: calc.perPersonAmount,
-    remainder: calc.remainder,
-    roundingUnit: calc.roundingUnit,
-    roundingPolicy: calc.roundingPolicy,
-    guildShareLedgerAmount: calc.guildShareLedgerAmount,
-    guildShareSubThousand: calc.guildShareSubThousand,
-    memo: "",
-    displayTitle: `${time} ${label}`,
-    displaySub: "",
-    participants: attendees.map((a) => createInitialParticipant(a.memberId, a.name, calc.perPersonAmount)),
-    revisionSnapshots: [],
-    revisionLogs: [],
-    modificationLogs: [],
-  })
+  const settlement = settlementFromCalc(
+    {
+      sourceType: "boss",
+      sourceId: slotId,
+      createdAt: Date.now(),
+      revision: 1,
+      overallStatus: "active",
+      memo: "",
+      displayTitle: `${time} ${label}`,
+      displaySub: "",
+      revisionSnapshots: [],
+      revisionLogs: [],
+      modificationLogs: [],
+    },
+    calc,
+    attendees,
+  )
 
   await persistSettlement(admin, settlement, actorId, guildId)
   await postSettlementGuildShareLedger(admin, guildId, settlement)
@@ -211,6 +294,7 @@ export async function createSiegeSettlementOnServer(
   totalRevenue: number,
   guildShareInput: number,
   memo = "",
+  managementFeeManualInput = 0,
 ): Promise<{ ok: boolean; message: string }> {
   const existing = await getSettlementByKey(admin, guildId, "siege", siegeId)
   if (existing) return { ok: false, message: "이미 공성 정산이 생성되었습니다." }
@@ -246,47 +330,42 @@ export async function createSiegeSettlementOnServer(
   }))
 
   if (totalRevenue <= 0) return { ok: false, message: "총 공성 수익을 입력해주세요." }
-  if (guildShareInput < 0 || guildShareInput > totalRevenue) {
-    return { ok: false, message: "혈맹 귀속금이 올바르지 않습니다." }
-  }
   if (attendees.length === 0) {
     return { ok: false, message: "실제 참여 확정자가 없어 정산할 수 없습니다." }
   }
 
-  const calc = calcSettlement({
+  const calcResult = await calcSettlementForCreate(
+    admin,
+    guildId,
     totalRevenue,
     guildShareInput,
-    participantCount: attendees.length,
-  })
+    managementFeeManualInput,
+    attendees.length,
+  )
+  if (!calcResult.ok) return { ok: false, message: calcResult.message }
+  const calc = calcResult.calc
 
   const key = makeSettlementKey("siege", siegeId)
   const displayTitle = `${siege.event_date} 공성`
   const displaySub = `${String(siege.start_time).slice(0, 5)} ~ ${String(siege.end_time).slice(0, 5)}`
 
-  const settlement: Settlement = finalize({
-    sourceType: "siege",
-    sourceId: siegeId,
-    createdAt: Date.now(),
-    revision: 1,
-    overallStatus: "active",
-    totalRevenue: calc.totalRevenue,
-    guildShareInput: calc.guildShareInput,
-    guildShareFinal: calc.guildShareFinal,
-    distributableAmount: calc.distributableAmount,
-    perPersonAmount: calc.perPersonAmount,
-    remainder: calc.remainder,
-    roundingUnit: calc.roundingUnit,
-    roundingPolicy: calc.roundingPolicy,
-    guildShareLedgerAmount: calc.guildShareLedgerAmount,
-    guildShareSubThousand: calc.guildShareSubThousand,
-    memo: memo.trim(),
-    displayTitle,
-    displaySub,
-    participants: attendees.map((a) => createInitialParticipant(a.memberId, a.name, calc.perPersonAmount)),
-    revisionSnapshots: [],
-    revisionLogs: [],
-    modificationLogs: [],
-  })
+  const settlement = settlementFromCalc(
+    {
+      sourceType: "siege",
+      sourceId: siegeId,
+      createdAt: Date.now(),
+      revision: 1,
+      overallStatus: "active",
+      memo: memo.trim(),
+      displayTitle,
+      displaySub,
+      revisionSnapshots: [],
+      revisionLogs: [],
+      modificationLogs: [],
+    },
+    calc,
+    attendees,
+  )
 
   await persistSettlement(admin, settlement, actorId, guildId)
   await postSettlementGuildShareLedger(admin, guildId, settlement)

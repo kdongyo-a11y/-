@@ -6,6 +6,7 @@ import type {
   SettlementRevisionSnapshot,
   SettlementSourceType,
 } from "@/lib/settlement-types"
+import type { OperationPolicySnapshot } from "@/lib/operation-settings-types"
 import { makeSettlementKey } from "@/lib/settlement-types"
 
 export type SettlementRow = {
@@ -28,6 +29,13 @@ export type SettlementRow = {
   rounding_policy: string | null
   guild_share_ledger_amount: number | null
   guild_share_sub_thousand: number | null
+  reserve_mode_applied: string | null
+  reserve_percentage_applied: number | string | null
+  management_fee_mode_applied: string | null
+  management_fee_percentage_applied: number | string | null
+  management_fee_total: number | null
+  management_fee_manual_input: number | null
+  operation_policy_snapshot: OperationPolicySnapshot | Record<string, unknown> | null
   created_by: string | null
   created_at: string
   updated_at: string
@@ -179,6 +187,13 @@ export function settlementToHeaderRow(
     rounding_policy: settlement.roundingPolicy ?? null,
     guild_share_ledger_amount: settlement.guildShareLedgerAmount ?? null,
     guild_share_sub_thousand: settlement.guildShareSubThousand ?? null,
+    reserve_mode_applied: settlement.reserveModeApplied ?? null,
+    reserve_percentage_applied: settlement.reservePercentageApplied ?? null,
+    management_fee_mode_applied: settlement.managementFeeModeApplied ?? null,
+    management_fee_percentage_applied: settlement.managementFeePercentageApplied ?? null,
+    management_fee_total: settlement.managementFeeTotal ?? null,
+    management_fee_manual_input: settlement.managementFeeManualInput ?? null,
+    operation_policy_snapshot: settlement.operationPolicySnapshot ?? null,
     created_by: createdBy ?? null,
   }
 }
@@ -282,6 +297,23 @@ export function buildSettlementsFromRows(
         row.guild_share_sub_thousand != null
           ? Number(row.guild_share_sub_thousand)
           : undefined,
+      operationPolicySnapshot: parseOperationPolicySnapshot(row.operation_policy_snapshot),
+      managementFeeTotal:
+        row.management_fee_total != null ? Number(row.management_fee_total) : undefined,
+      managementFeeManualInput:
+        row.management_fee_manual_input != null
+          ? Number(row.management_fee_manual_input)
+          : undefined,
+      reserveModeApplied: row.reserve_mode_applied ?? undefined,
+      reservePercentageApplied:
+        row.reserve_percentage_applied != null
+          ? Number(row.reserve_percentage_applied)
+          : undefined,
+      managementFeeModeApplied: row.management_fee_mode_applied ?? undefined,
+      managementFeePercentageApplied:
+        row.management_fee_percentage_applied != null
+          ? Number(row.management_fee_percentage_applied)
+          : undefined,
       participants,
       revisionSnapshots,
       revisionLogs,
@@ -290,4 +322,12 @@ export function buildSettlementsFromRows(
   }
 
   return result
+}
+
+function parseOperationPolicySnapshot(
+  value: OperationPolicySnapshot | Record<string, unknown> | null | undefined,
+): OperationPolicySnapshot | undefined {
+  if (!value || typeof value !== "object") return undefined
+  if (!("reserveMode" in value) || !("managementFeeMode" in value)) return undefined
+  return value as OperationPolicySnapshot
 }

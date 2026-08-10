@@ -67,20 +67,33 @@ export async function fetchSettlements(): Promise<{
 }
 
 export const settlementApi = {
-  createBoss: (slotId: string, totalRevenue: number, guildShareInput: number) =>
+  createBoss: (
+    slotId: string,
+    totalRevenue: number,
+    guildShareInput: number,
+    managementFeeManualInput = 0,
+  ) =>
     postJson<{ ok: boolean; message: string }>("/api/settlements/mutate", {
       action: "create_boss",
       slotId,
       totalRevenue,
       guildShareInput,
+      managementFeeManualInput,
     }),
-  createSiege: (siegeId: string, totalRevenue: number, guildShareInput: number, memo?: string) =>
+  createSiege: (
+    siegeId: string,
+    totalRevenue: number,
+    guildShareInput: number,
+    memo?: string,
+    managementFeeManualInput = 0,
+  ) =>
     postJson<{ ok: boolean; message: string }>("/api/settlements/mutate", {
       action: "create_siege",
       siegeId,
       totalRevenue,
       guildShareInput,
       memo,
+      managementFeeManualInput,
     }),
   revise: (
     sourceType: "boss" | "siege",
