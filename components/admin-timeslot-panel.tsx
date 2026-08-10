@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo, useState, type ReactNode } from "react"
 import {
   Copy,
   RefreshCw,
@@ -10,6 +10,8 @@ import {
   CheckCircle2,
   Radio,
   Lock,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react"
 import { SectionTitle, Badge, Card } from "@/components/ui-bits"
 import {
@@ -82,6 +84,13 @@ export function AdminTimeslotPanel({ slotId: controlledSlotId, embedded = false 
     member: RosterMember
   } | null>(null)
   const [memoText, setMemoText] = useState("")
+  const [participantsExpanded, setParticipantsExpanded] = useState(false)
+  const [nonParticipantsExpanded, setNonParticipantsExpanded] = useState(false)
+  const [multiAddOpen, setMultiAddOpen] = useState(false)
+  const [multiAddSearch, setMultiAddSearch] = useState("")
+  const [multiAddSelected, setMultiAddSelected] = useState<Set<string>>(() => new Set())
+  const [multiAddMemo, setMultiAddMemo] = useState("")
+  const [batchAdding, setBatchAdding] = useState(false)
 
   const selectedSlot = resolveSlot(slots, selectedSlotId) ?? slots[0]!
   const check = getCheck(selectedSlotId)
@@ -101,13 +110,22 @@ export function AdminTimeslotPanel({ slotId: controlledSlotId, embedded = false 
     return check.attendees.filter((a) => a.name.toLowerCase().includes(q))
   }, [check.attendees, search])
 
-  const nonAttendees = useMemo(() => {
+  const allNonAttendees = useMemo(() => {
     const joinedIds = new Set(check.attendees.map((a) => a.memberId))
+    return rosterForCheck.filter((m) => !joinedIds.has(m.id))
+  }, [check.attendees, rosterForCheck])
+
+  const filteredNonAttendees = useMemo(() => {
     const q = search.trim().toLowerCase()
-    return rosterForCheck.filter(
-      (m) => !joinedIds.has(m.id) && (!q || m.nickname.toLowerCase().includes(q)),
-    )
-  }, [check.attendees, search])
+    if (!q) return allNonAttendees
+    return allNonAttendees.filter((m) => m.nickname.toLowerCase().includes(q))
+  }, [allNonAttendees, search])
+
+  const multiAddCandidates = useMemo(() => {
+    const q = multiAddSearch.trim().toLowerCase()
+    if (!q) return allNonAttendees
+    return allNonAttendees.filter((m) => m.nickname.toLowerCase().includes(q))
+  }, [allNonAttendees, multiAddSearch])
 
   async function handleStart() {
     if (starting || !canStartParticipationCheck) return
@@ -181,6 +199,83 @@ export function AdminTimeslotPanel({ slotId: controlledSlotId, embedded = false 
 
     setMemoModal(null)
     setMemoText("")
+  }
+
+  function openMultiAdd() {
+    setMultiAddOpen(true)
+    setMultiAddSearch("")
+    setMultiAddSelected(new Set())
+    setMultiAddMemo("")
+  }
+
+  function toggleMultiAddMember(memberId: string) {
+    setMultiAddSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(memberId)) next.delete(memberId)
+      else next.add(memberId)
+      return next
+    })
+  }
+
+  async function submitBatchAdd() {
+    const memo = multiAddMemo.trim()
+    if (!memo) return
+
+    const selectedMembers = allNonAttendees.filter((m) => multiAddSelected.has(m.id))
+    if (selectedMembers.length === 0) return
+
+    setBatchAdding(true)
+    try {
+      let successCount = 0
+      const failedMembers: RosterMember[] = []
+      const failureMessages: string[] = []
+
+      for (const member of selectedMembers) {
+        const result = await addAttendeeManual(selectedSlotId, member, memo)
+        if (result.ok) {
+          successCount++
+        } else {
+          failedMembers.push(member)
+          failureMessages.push(`${member.nickname}: ${result.message}`)
+        }
+      }
+
+      if (successCount > 0) {
+        const settlementAfter = getBossSettlement(selectedSlotId)
+        if (settlementAfter && isClosed) {
+          const r = await reviseSettlement("boss", selectedSlotId, [], memo)
+          if (!r.ok) {
+            failureMessages.push(`정산 갱신: ${r.message}`)
+          }
+        }
+      }
+
+      if (failedMembers.length === 0 && failureMessages.length === 0) {
+        setMultiAddOpen(false)
+        setMultiAddSelected(new Set())
+        setMultiAddMemo("")
+        setMultiAddSearch("")
+        return
+      }
+
+      const summary =
+        failureMessages.length > 0
+          ? `${successCount}명 추가 완료 / ${failedMembers.length}명 실패`
+          : `${successCount}명 추가 완료`
+
+      alert([summary, ...failureMessages].join("\n"))
+
+      if (failedMembers.length > 0) {
+        setMultiAddSelected(new Set(failedMembers.map((m) => m.id)))
+      } else {
+        setMultiAddOpen(false)
+        setMultiAddSelected(new Set())
+        setMultiAddMemo("")
+        setMultiAddSearch("")
+      }
+    } finally {
+      setBatchAdding(false)
+    }
   }
 
   return (
@@ -310,8 +405,15 @@ export function AdminTimeslotPanel({ slotId: controlledSlotId, embedded = false 
             search={search}
             onSearchChange={setSearch}
             attendees={filteredAttendees}
-            nonAttendees={nonAttendees}
+            attendeeCount={check.attendees.length}
+            nonAttendees={filteredNonAttendees}
+            nonAttendeeCount={allNonAttendees.length}
             roster={rosterForCheck}
+            participantsExpanded={participantsExpanded}
+            onParticipantsExpandedChange={setParticipantsExpanded}
+            nonParticipantsExpanded={nonParticipantsExpanded}
+            onNonParticipantsExpandedChange={setNonParticipantsExpanded}
+            onOpenMultiAdd={openMultiAdd}
             onAdd={(m) => {
               setMemoModal({ action: "add", member: m })
               setMemoText("")
@@ -320,7 +422,6 @@ export function AdminTimeslotPanel({ slotId: controlledSlotId, embedded = false 
               setMemoModal({ action: "remove", member: m })
               setMemoText("")
             }}
-            showAddList
           />
 
           <button
@@ -350,8 +451,15 @@ export function AdminTimeslotPanel({ slotId: controlledSlotId, embedded = false 
             search={search}
             onSearchChange={setSearch}
             attendees={filteredAttendees}
-            nonAttendees={nonAttendees}
+            attendeeCount={check.attendees.length}
+            nonAttendees={filteredNonAttendees}
+            nonAttendeeCount={allNonAttendees.length}
             roster={rosterForCheck}
+            participantsExpanded={participantsExpanded}
+            onParticipantsExpandedChange={setParticipantsExpanded}
+            nonParticipantsExpanded={nonParticipantsExpanded}
+            onNonParticipantsExpandedChange={setNonParticipantsExpanded}
+            onOpenMultiAdd={openMultiAdd}
             onAdd={(m) => {
               setMemoModal({ action: "add", member: m })
               setMemoText("")
@@ -360,7 +468,6 @@ export function AdminTimeslotPanel({ slotId: controlledSlotId, embedded = false 
               setMemoModal({ action: "remove", member: m })
               setMemoText("")
             }}
-            showAddList
           />
 
           {check.adminLogs.length > 0 && (
@@ -384,6 +491,102 @@ export function AdminTimeslotPanel({ slotId: controlledSlotId, embedded = false 
               </div>
             </>
           )}
+        </div>
+      )}
+
+      {/* Multi-add modal */}
+      {multiAddOpen && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4 sm:items-center">
+          <div className="flex max-h-[85vh] w-full max-w-sm flex-col rounded-2xl border border-border bg-card p-4 shadow-xl">
+            <p className="text-sm font-semibold text-foreground">참여자 수동 추가</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              미참여 혈원 {allNonAttendees.length}명 중 선택 · {multiAddSelected.size}명 선택됨
+            </p>
+
+            <div className="relative mt-3">
+              <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <input
+                type="search"
+                value={multiAddSearch}
+                onChange={(e) => setMultiAddSearch(e.target.value)}
+                placeholder="캐릭터명 검색..."
+                className="w-full rounded-xl border border-border bg-input py-2.5 pl-9 pr-3 text-sm text-foreground outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+              />
+            </div>
+
+            <div className="mt-3 min-h-0 flex-1 overflow-y-auto rounded-xl border border-border">
+              {multiAddCandidates.length === 0 ? (
+                <p className="px-3 py-6 text-center text-xs text-muted-foreground">
+                  {allNonAttendees.length === 0 ? "미참여 혈원이 없습니다." : "검색 결과가 없습니다."}
+                </p>
+              ) : (
+                <ul className="divide-y divide-border">
+                  {multiAddCandidates.map((m) => {
+                    const checked = multiAddSelected.has(m.id)
+                    return (
+                      <li key={m.id}>
+                        <label className="flex cursor-pointer items-center gap-3 px-3 py-2.5">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleMultiAddMember(m.id)}
+                            className="h-4 w-4 rounded border-border"
+                          />
+                          <span className="truncate text-sm font-medium text-foreground">{m.nickname}</span>
+                        </label>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+            </div>
+
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {MEMO_PRESETS.map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  onClick={() => setMultiAddMemo(preset)}
+                  className="rounded-full border border-border bg-secondary px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  {preset}
+                </button>
+              ))}
+            </div>
+
+            <textarea
+              value={multiAddMemo}
+              onChange={(e) => setMultiAddMemo(e.target.value)}
+              placeholder="관리자 메모 (필수)..."
+              rows={2}
+              className="mt-3 w-full resize-none rounded-xl border border-border bg-input px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+            />
+
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setMultiAddOpen(false)
+                  setMultiAddSelected(new Set())
+                  setMultiAddMemo("")
+                  setMultiAddSearch("")
+                }}
+                className="flex-1 rounded-xl border border-border bg-secondary py-2.5 text-sm font-medium text-muted-foreground"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={() => void submitBatchAdd()}
+                disabled={batchAdding || multiAddSelected.size === 0 || !multiAddMemo.trim()}
+                className="flex-1 rounded-xl bg-primary py-2.5 text-sm font-semibold text-primary-foreground disabled:opacity-50"
+              >
+                {batchAdding
+                  ? "추가 중..."
+                  : `선택한 ${multiAddSelected.size}명 추가`}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -509,70 +712,99 @@ function AttendeeSection({
   search,
   onSearchChange,
   attendees,
+  attendeeCount,
   nonAttendees,
+  nonAttendeeCount,
   roster,
+  participantsExpanded,
+  onParticipantsExpandedChange,
+  nonParticipantsExpanded,
+  onNonParticipantsExpandedChange,
+  onOpenMultiAdd,
   onAdd,
   onRemove,
-  showAddList,
 }: {
   search: string
   onSearchChange: (v: string) => void
   attendees: Attendee[]
+  attendeeCount: number
   nonAttendees: RosterMember[]
+  nonAttendeeCount: number
   roster: RosterMember[]
+  participantsExpanded: boolean
+  onParticipantsExpandedChange: (v: boolean) => void
+  nonParticipantsExpanded: boolean
+  onNonParticipantsExpandedChange: (v: boolean) => void
+  onOpenMultiAdd: () => void
   onAdd: (m: RosterMember) => void
   onRemove: (m: RosterMember) => void
-  showAddList: boolean
 }) {
   return (
-    <>
+    <div className="flex flex-col gap-2">
       <div className="relative">
         <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
         <input
           type="search"
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
-          placeholder="참여자 검색..."
+          placeholder="명단 검색 (펼친 후)..."
           className="w-full rounded-xl border border-border bg-input py-2.5 pl-9 pr-3 text-sm text-foreground outline-none focus:border-primary focus:ring-1 focus:ring-primary"
         />
       </div>
 
-      <SectionTitle action={<span className="text-xs text-muted-foreground">{attendees.length}명</span>}>
-        참여자 명단
-      </SectionTitle>
-      <div className="flex flex-col gap-2">
-        {attendees.length === 0 && (
-          <p className="py-4 text-center text-xs text-muted-foreground">참여자가 없습니다.</p>
-        )}
-        {attendees.map((a) => (
-          <Card key={a.memberId} className="flex items-center gap-3 py-2.5">
-            <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium text-foreground">{a.name}</p>
-              <p className="text-[11px] text-muted-foreground">
-                체크 {formatCheckTime(a.checkedAt)} · {a.method}
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                const member = roster.find((m) => m.id === a.memberId)
-                if (member) onRemove(member)
-              }}
-              className="flex shrink-0 items-center gap-1 rounded-lg bg-destructive/10 px-2 py-1.5 text-[11px] font-semibold text-destructive"
-            >
-              <UserMinus className="h-3 w-3" />
-              제외
-            </button>
-          </Card>
-        ))}
-      </div>
+      <CollapsibleListRow
+        label="참여자"
+        count={attendeeCount}
+        expanded={participantsExpanded}
+        onToggle={() => onParticipantsExpandedChange(!participantsExpanded)}
+      />
+      {participantsExpanded && (
+        <ScrollableMemberList>
+          {attendees.length === 0 ? (
+            <p className="py-4 text-center text-xs text-muted-foreground">
+              {attendeeCount === 0 ? "참여자가 없습니다." : "검색 결과가 없습니다."}
+            </p>
+          ) : (
+            attendees.map((a) => (
+              <Card key={a.memberId} className="flex items-center gap-3 py-2.5">
+                <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-foreground">{a.name}</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    체크 {formatCheckTime(a.checkedAt)} · {a.method}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const member = roster.find((m) => m.id === a.memberId)
+                    if (member) onRemove(member)
+                  }}
+                  className="flex shrink-0 items-center gap-1 rounded-lg bg-destructive/10 px-2 py-1.5 text-[11px] font-semibold text-destructive"
+                >
+                  <UserMinus className="h-3 w-3" />
+                  제외
+                </button>
+              </Card>
+            ))
+          )}
+        </ScrollableMemberList>
+      )}
 
-      {showAddList && nonAttendees.length > 0 && (
-        <>
-          <SectionTitle>미참여 혈원</SectionTitle>
-          <div className="flex flex-col gap-2">
-            {nonAttendees.slice(0, 8).map((m) => (
+      <CollapsibleListRow
+        label="미참여 혈원"
+        count={nonAttendeeCount}
+        expanded={nonParticipantsExpanded}
+        onToggle={() => onNonParticipantsExpandedChange(!nonParticipantsExpanded)}
+      />
+      {nonParticipantsExpanded && (
+        <ScrollableMemberList>
+          {nonAttendees.length === 0 ? (
+            <p className="py-4 text-center text-xs text-muted-foreground">
+              {nonAttendeeCount === 0 ? "미참여 혈원이 없습니다." : "검색 결과가 없습니다."}
+            </p>
+          ) : (
+            nonAttendees.map((m) => (
               <Card key={m.id} className="flex items-center gap-3 py-2.5">
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium text-foreground">{m.nickname}</p>
@@ -586,10 +818,58 @@ function AttendeeSection({
                   추가
                 </button>
               </Card>
-            ))}
-          </div>
-        </>
+            ))
+          )}
+        </ScrollableMemberList>
       )}
-    </>
+
+      {nonAttendeeCount > 0 && (
+        <button
+          type="button"
+          onClick={onOpenMultiAdd}
+          className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-primary/30 bg-primary/10 py-2.5 text-sm font-semibold text-primary"
+        >
+          <UserPlus className="h-4 w-4" />
+          참여자 수동 추가
+        </button>
+      )}
+    </div>
+  )
+}
+
+function CollapsibleListRow({
+  label,
+  count,
+  expanded,
+  onToggle,
+}: {
+  label: string
+  count: number
+  expanded: boolean
+  onToggle: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className="flex w-full items-center justify-between rounded-xl border border-border bg-card px-4 py-3 text-left transition-colors hover:bg-accent/50"
+    >
+      <span className="text-sm font-medium text-foreground">
+        {label} {count}명
+      </span>
+      {expanded ? (
+        <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+      ) : (
+        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+      )}
+    </button>
+  )
+}
+
+function ScrollableMemberList({ children }: { children: ReactNode }) {
+  return (
+    <div className="max-h-64 overflow-y-auto rounded-xl border border-border bg-card/50 p-2">
+      <div className="flex flex-col gap-2">{children}</div>
+    </div>
   )
 }
