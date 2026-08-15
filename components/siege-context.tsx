@@ -191,6 +191,7 @@ type SiegeContextValue = {
   getSiegeFinancialFlags: (siegeId: string) => SiegeFinancialFlags
   closeSiegeWithNoIncome: (siegeId: string) => Promise<{ ok: boolean; message: string }>
   declareSiegeIncome: (siegeId: string) => Promise<{ ok: boolean; message: string }>
+  ensureFullSiegeDataLoaded: () => Promise<void>
 }
 
 const SiegeContext = createContext<SiegeContextValue | null>(null)
@@ -267,26 +268,42 @@ function canEditAttendance(status: SiegeStatus): boolean {
   )
 }
 
-export function SiegeProvider({ children }: { children: ReactNode }) {
+export function SiegeProvider({
+  children,
+  initialSieges,
+  skipInitialFetch = false,
+}: {
+  children: ReactNode
+  initialSieges?: SiegeEvent[]
+  skipInitialFetch?: boolean
+}) {
   const { getActiveMembers } = useMembers()
   const currentMemberId = useCurrentMemberId()
-  const [sieges, setSieges] = useState<SiegeEvent[]>([])
+  const [sieges, setSieges] = useState<SiegeEvent[]>(initialSieges ?? [])
+  const fullSiegeDataLoadedRef = useRef(false)
 
   const siegesRef = useRef(sieges)
   siegesRef.current = sieges
 
-  const refreshSiegeData = useCallback(async (): Promise<SiegeEvent[]> => {
-    const result = await fetchSiegeEvents()
+  const refreshSiegeData = useCallback(async (scope: "home" | "full" = "full"): Promise<SiegeEvent[]> => {
+    const result = await fetchSiegeEvents(scope)
     if (result.ok && result.sieges) {
       setSieges(result.sieges)
+      if (scope === "full") fullSiegeDataLoadedRef.current = true
       return result.sieges
     }
     return siegesRef.current
   }, [])
 
-  useEffect(() => {
-    void refreshSiegeData()
+  const ensureFullSiegeDataLoaded = useCallback(async () => {
+    if (fullSiegeDataLoadedRef.current) return
+    await refreshSiegeData("full")
   }, [refreshSiegeData])
+
+  useEffect(() => {
+    if (skipInitialFetch) return
+    void refreshSiegeData("full")
+  }, [refreshSiegeData, skipInitialFetch])
 
   const rosterTotal = getActiveMembers().length
 
@@ -627,6 +644,7 @@ export function SiegeProvider({ children }: { children: ReactNode }) {
       getSiegeFinancialFlags,
       closeSiegeWithNoIncome,
       declareSiegeIncome,
+      ensureFullSiegeDataLoaded,
     }),
     [
       sieges,
@@ -656,6 +674,7 @@ export function SiegeProvider({ children }: { children: ReactNode }) {
       getSiegeFinancialFlags,
       closeSiegeWithNoIncome,
       declareSiegeIncome,
+      ensureFullSiegeDataLoaded,
     ],
   )
 

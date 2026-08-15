@@ -57,10 +57,18 @@ type DuesContextValue = {
 
 const DuesContext = createContext<DuesContextValue | null>(null)
 
-export function DuesProvider({ children }: { children: ReactNode }) {
+export function DuesProvider({
+  children,
+  initialBills,
+  skipInitialFetch = false,
+}: {
+  children: ReactNode
+  initialBills?: DuesBill[]
+  skipInitialFetch?: boolean
+}) {
   const { refreshFinance } = useGuildLedger()
-  const [bills, setBills] = useState<DuesBill[]>([])
-  const [isLoading, setIsLoading] = useState(true)
+  const [bills, setBills] = useState<DuesBill[]>(initialBills ?? [])
+  const [isLoading, setIsLoading] = useState(!skipInitialFetch)
   const [loadError, setLoadError] = useState<string | null>(null)
 
   const refreshDues = useCallback(async () => {
@@ -74,6 +82,7 @@ export function DuesProvider({ children }: { children: ReactNode }) {
   }, [])
 
   useEffect(() => {
+    if (skipInitialFetch) return
     let cancelled = false
     void (async () => {
       setIsLoading(true)
@@ -83,7 +92,7 @@ export function DuesProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true
     }
-  }, [refreshDues])
+  }, [refreshDues, skipInitialFetch])
 
   const activeBillId = bills[0]?.id ?? null
 

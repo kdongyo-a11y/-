@@ -14,6 +14,7 @@ import {
   kstLocalDateTimeToIso,
 } from "@/lib/operation-policy-kst-utils"
 import type { PolicyAmountMode } from "@/lib/operation-settings-types"
+import { PerfTimer } from "@/lib/perf-log"
 
 type Body = {
   action?: "create_version" | "cancel_scheduled_version"
@@ -45,10 +46,13 @@ function resolveEffectiveFromIso(body: Body): { ok: true; iso: string } | { ok: 
 }
 
 export async function POST(request: Request) {
+  const perf = new PerfTimer("operation-policy-save")
   try {
     const supabase = await createClient()
-    const authResult = await requireAuthenticatedMember(supabase)
+    const authResult = await perf.measure("authMs", () => requireAuthenticatedMember(supabase))
+    perf.addDbCalls(2)
     if ("error" in authResult) {
+      perf.finish({ ok: false })
       return NextResponse.json(
         { ok: false, message: authResult.error },
         { status: authResult.status },
@@ -57,6 +61,7 @@ export async function POST(request: Request) {
 
     const adminCheck = requireAdmin(authResult.member)
     if (!adminCheck.ok) {
+      perf.finish({ ok: false })
       return NextResponse.json(
         { ok: false, message: adminCheck.message },
         { status: adminCheck.status },
@@ -69,18 +74,24 @@ export async function POST(request: Request) {
 
     if (body.action === "cancel_scheduled_version") {
       if (!body.versionId) {
+        perf.finish({ ok: false, reason: "validation" })
         return NextResponse.json({ ok: false, message: "versionId가 필요합니다." }, { status: 400 })
       }
-      const result = await cancelScheduledPolicyVersionOnServer(
-        admin,
-        authResult.member.id,
-        guildId,
-        body.versionId,
-        body.cancelReason ?? "",
+      const result = await perf.measure("dbMs", () =>
+        cancelScheduledPolicyVersionOnServer(
+          admin,
+          authResult.member.id,
+          guildId,
+          body.versionId!,
+          body.cancelReason ?? "",
+        ),
       )
+      perf.addDbCalls(4)
       if (!result.ok) {
+        perf.finish({ ok: false })
         return NextResponse.json({ ok: false, message: result.message }, { status: 400 })
       }
+      perf.finish({ ok: true, action: "cancel_scheduled_version" })
       return NextResponse.json({
         ok: true,
         message: "예약 정책이 취소되었습니다.",
@@ -89,41 +100,49 @@ export async function POST(request: Request) {
     }
 
     if (body.action !== "create_version") {
+      perf.finish({ ok: false, reason: "unknown_action" })
       return NextResponse.json({ ok: false, message: "알 수 없는 요청입니다." }, { status: 400 })
     }
 
     if (!isValidPolicyAmountMode(body.managementFeeMode) || !isValidPolicyAmountMode(body.reserveMode)) {
+      perf.finish({ ok: false, reason: "validation" })
       return NextResponse.json({ ok: false, message: "산정 방식이 올바르지 않습니다." }, { status: 400 })
     }
 
     const effectiveFrom = resolveEffectiveFromIso(body)
     if (!effectiveFrom.ok) {
+      perf.finish({ ok: false, reason: "validation" })
       return NextResponse.json({ ok: false, message: effectiveFrom.message }, { status: 400 })
     }
 
-    const result = await createGuildOperationPolicyVersionOnServer(
-      admin,
-      authResult.member.id,
-      guildId,
-      {
-        managementFeeMode: body.managementFeeMode!,
-        managementFeePercentage:
-          body.managementFeePercentage != null ? Number(body.managementFeePercentage) : null,
-        reserveMode: body.reserveMode!,
-        reservePercentage: body.reservePercentage != null ? Number(body.reservePercentage) : null,
-        allocations: (body.allocations ?? []).map((a) => ({
-          memberId: a.memberId,
-          ratioBp: Number(a.ratioBp),
-        })),
-        changeReason: body.changeReason ?? "",
-        effectiveFromIso: effectiveFrom.iso,
-      },
+    const result = await perf.measure("dbMs", () =>
+      createGuildOperationPolicyVersionOnServer(
+        admin,
+        authResult.member.id,
+        guildId,
+        {
+          managementFeeMode: body.managementFeeMode!,
+          managementFeePercentage:
+            body.managementFeePercentage != null ? Number(body.managementFeePercentage) : null,
+          reserveMode: body.reserveMode!,
+          reservePercentage: body.reservePercentage != null ? Number(body.reservePercentage) : null,
+          allocations: (body.allocations ?? []).map((a) => ({
+            memberId: a.memberId,
+            ratioBp: Number(a.ratioBp),
+          })),
+          changeReason: body.changeReason ?? "",
+          effectiveFromIso: effectiveFrom.iso,
+        },
+      ),
     )
+    perf.addDbCalls(6)
 
     if (!result.ok) {
+      perf.finish({ ok: false })
       return NextResponse.json({ ok: false, message: result.message }, { status: 400 })
     }
 
+    perf.finish({ ok: true, action: "create_version" })
     return NextResponse.json({
       ok: true,
       message: "운영 정책 version이 등록되었습니다.",
@@ -132,6 +151,7 @@ export async function POST(request: Request) {
     })
   } catch (error) {
     console.error("[admin/operation-settings/mutate]", error)
+    perf.finish({ ok: false, reason: "error" })
     return NextResponse.json(
       { ok: false, message: "운영 정책 저장 중 오류가 발생했습니다." },
       { status: 500 },

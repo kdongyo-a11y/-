@@ -3,6 +3,7 @@ import { getTodayDateString } from "@/lib/boss-time-slots"
 import { getSlotConfig, formatSlotTime, getSlotLabel } from "@/lib/boss-time-slots"
 import { parseSlotId } from "@/lib/supabase/boss-mapper"
 import { getBossEventBySlotId } from "@/lib/supabase/boss-event-helpers"
+import type { BossEventRow } from "@/lib/supabase/boss-mapper"
 import { getGuildShareSubThousand } from "@/lib/settlement-utils"
 import { calcSettlementWithPolicy } from "@/lib/operation-settings-utils"
 import { resolveSettlementPolicyInputs } from "@/lib/supabase/operation-settings-data"
@@ -203,8 +204,9 @@ async function fetchBossAttendeesFromDb(
   admin: SupabaseClient,
   slotId: string,
   guildId: string,
+  knownEvent?: BossEventRow | null,
 ): Promise<{ ok: true; attendees: AttendeeInput[] } | { ok: false; message: string }> {
-  const event = await getBossEventBySlotId(admin, slotId, guildId)
+  const event = knownEvent ?? (await getBossEventBySlotId(admin, slotId, guildId))
   if (!event) {
     return { ok: false, message: "보스타임 이벤트를 찾을 수 없습니다." }
   }
@@ -220,20 +222,22 @@ async function fetchBossAttendeesFromDb(
     return { ok: false, message: "참여자 목록을 불러오지 못했습니다." }
   }
 
+  const memberIds = (parts ?? []).map((p: { member_id: string }) => p.member_id)
+  if (memberIds.length === 0) {
+    return { ok: false, message: "참여자가 없어 정산을 수정할 수 없습니다." }
+  }
+
   const { data: members } = await admin
     .from("members")
     .select("id, nickname")
     .eq("guild_id", guildId)
+    .in("id", memberIds)
   const names = new Map((members ?? []).map((m: { id: string; nickname: string }) => [m.id, m.nickname]))
 
-  const attendees: AttendeeInput[] = (parts ?? []).map((p: { member_id: string }) => ({
-    memberId: p.member_id,
-    name: names.get(p.member_id) ?? "혈원",
+  const attendees: AttendeeInput[] = memberIds.map((memberId) => ({
+    memberId,
+    name: names.get(memberId) ?? "혈원",
   }))
-
-  if (attendees.length === 0) {
-    return { ok: false, message: "참여자가 없어 정산을 수정할 수 없습니다." }
-  }
 
   return { ok: true, attendees }
 }
@@ -260,7 +264,7 @@ export async function createBossSettlementOnServer(
   if (!parsed) return { ok: false, message: "보스타임을 찾을 수 없습니다." }
 
   const slotConfig = getSlotConfig(parsed.slotHour)
-  const attendeeResult = await fetchBossAttendeesFromDb(admin, slotId, guildId)
+  const attendeeResult = await fetchBossAttendeesFromDb(admin, slotId, guildId, event)
   if (!attendeeResult.ok) return { ok: false, message: attendeeResult.message }
   const attendees = attendeeResult.attendees
 
@@ -300,8 +304,7 @@ export async function createBossSettlementOnServer(
     attendees,
   )
 
-  await persistSettlement(admin, settlement, actorId, guildId)
-  const bossSettlementId = await getSettlementDbId(admin, guildId, "boss", slotId)
+  const { settlementId: bossSettlementId } = await persistSettlement(admin, settlement, actorId, guildId)
   const hasRevenueItems = (revenueItems?.length ?? 0) > 0
 
   if (bossSettlementId) {
@@ -424,8 +427,7 @@ export async function createSiegeSettlementOnServer(
     attendees,
   )
 
-  await persistSettlement(admin, settlement, actorId, guildId)
-  const siegeSettlementId = await getSettlementDbId(admin, guildId, "siege", siegeId)
+  const { settlementId: siegeSettlementId } = await persistSettlement(admin, settlement, actorId, guildId)
   const hasRevenueItems = (revenueItems?.length ?? 0) > 0
 
   if (siegeSettlementId) {

@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react"
@@ -170,6 +171,7 @@ type SettlementContextValue = {
   isLoading: boolean
   loadError: string | null
   refreshSettlements: () => Promise<void>
+  ensureFullSettlementsLoaded: () => Promise<void>
 }
 
 const SettlementContext = createContext<SettlementContextValue | null>(null)
@@ -217,13 +219,24 @@ function buildSummary(participants: SettlementParticipant[]): SettlementSummary 
   }
 }
 
-export function SettlementProvider({ children }: { children: ReactNode }) {
+export function SettlementProvider({
+  children,
+  initialSettlements,
+  skipInitialFetch = false,
+}: {
+  children: ReactNode
+  initialSettlements?: Record<string, Settlement>
+  skipInitialFetch?: boolean
+}) {
   const { getSiege } = useSiege()
   const { refreshFinance } = useGuildLedger()
   const currentMemberId = useCurrentMemberId()
-  const [settlements, setSettlements] = useState<Record<string, Settlement>>({})
-  const [isLoading, setIsLoading] = useState(true)
+  const [settlements, setSettlements] = useState<Record<string, Settlement>>(
+    initialSettlements ?? {},
+  )
+  const [isLoading, setIsLoading] = useState(!skipInitialFetch)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const fullSettlementsLoadedRef = useRef(false)
 
   const refreshSettlements = useCallback(async () => {
     const result = await fetchSettlements()
@@ -233,9 +246,16 @@ export function SettlementProvider({ children }: { children: ReactNode }) {
     }
     setLoadError(null)
     setSettlements(result.settlements ?? {})
+    fullSettlementsLoadedRef.current = true
   }, [])
 
+  const ensureFullSettlementsLoaded = useCallback(async () => {
+    if (fullSettlementsLoadedRef.current) return
+    await refreshSettlements()
+  }, [refreshSettlements])
+
   useEffect(() => {
+    if (skipInitialFetch) return
     let cancelled = false
     void (async () => {
       setIsLoading(true)
@@ -245,7 +265,7 @@ export function SettlementProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true
     }
-  }, [refreshSettlements])
+  }, [refreshSettlements, skipInitialFetch])
 
   const getSettlement = useCallback(
     (sourceType: SettlementSourceType, sourceId: string) => {
@@ -698,6 +718,7 @@ export function SettlementProvider({ children }: { children: ReactNode }) {
       isLoading,
       loadError,
       refreshSettlements,
+      ensureFullSettlementsLoaded,
     }),
     [
       settlements,
@@ -734,6 +755,7 @@ export function SettlementProvider({ children }: { children: ReactNode }) {
       isLoading,
       loadError,
       refreshSettlements,
+      ensureFullSettlementsLoaded,
     ],
   )
 

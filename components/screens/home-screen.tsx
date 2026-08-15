@@ -13,8 +13,7 @@ import { NoticeDetailScreen } from "@/components/notice-detail-screen"
 import { useParticipation } from "@/components/participation-context"
 import { useSiege } from "@/components/siege-context"
 import { useDues } from "@/components/dues-context"
-import { useCurrentMemberId } from "@/components/auth-context"
-import { useMembers } from "@/components/members-context"
+import { useCurrentMemberId, useAuth } from "@/components/auth-context"
 import { useSettlement } from "@/components/settlement-context"
 import { useMemberContribution, getThisMonthPeriod } from "@/components/use-contribution"
 import { formatSiegeTimeRange } from "@/lib/siege-utils"
@@ -34,8 +33,8 @@ export function HomeScreen() {
   const { isPaid, bills, activeBillId } = useDues()
 
   const memberId = useCurrentMemberId()
-  const { getMember } = useMembers()
-  const user = getMember(memberId)
+  const { currentMember } = useAuth()
+  const user = currentMember ?? getMember(memberId)
   const period = getThisMonthPeriod()
   const contribution = useMemberContribution(memberId, period)
   const { getMemberReceivedPayoutTotal } = useSettlement()

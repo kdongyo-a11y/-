@@ -22,6 +22,7 @@ import {
 import { useMembers } from "@/components/members-context"
 import { useSettlement } from "@/components/settlement-context"
 import { type RosterMember } from "@/lib/member-types"
+import { bossApi } from "@/lib/operations-api"
 import {
   MAIN_EXTRA_BOSSES,
   MAIN_FIXED_BOSSES,
@@ -63,6 +64,7 @@ export function AdminTimeslotPanel({ slotId: controlledSlotId, embedded = false 
     openSlotId,
     loadError,
     retryLoad,
+    applyBossPatch,
   } = useParticipation()
   const { getRosterMembers } = useMembers()
   const { getBossSettlement, reviseSettlement } = useSettlement()
@@ -226,19 +228,29 @@ export function AdminTimeslotPanel({ slotId: controlledSlotId, embedded = false 
 
     setBatchAdding(true)
     try {
-      let successCount = 0
-      const failedMembers: RosterMember[] = []
-      const failureMessages: string[] = []
+      const result = await bossApi.manualParticipationBatch({
+        slotId: selectedSlotId,
+        memo,
+        batch: selectedMembers.map((member) => ({
+          memberId: member.id,
+          action: "add" as const,
+          memo,
+        })),
+      })
 
-      for (const member of selectedMembers) {
-        const result = await addAttendeeManual(selectedSlotId, member, memo)
-        if (result.ok) {
-          successCount++
-        } else {
-          failedMembers.push(member)
-          failureMessages.push(`${member.nickname}: ${result.message}`)
-        }
+      if (result.ok) {
+        applyBossPatch(result.patch)
       }
+
+      const successCount = result.results?.filter((r) => r.ok).length ?? 0
+      const failedMembers = selectedMembers.filter(
+        (m) => result.results?.find((r) => r.memberId === m.id && !r.ok),
+      )
+      const failureMessages =
+        result.results?.filter((r) => !r.ok).map((r) => {
+          const member = selectedMembers.find((m) => m.id === r.memberId)
+          return `${member?.nickname ?? r.memberId}: ${r.message}`
+        }) ?? []
 
       if (successCount > 0) {
         const settlementAfter = getBossSettlement(selectedSlotId)

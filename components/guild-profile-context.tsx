@@ -117,8 +117,9 @@ export function GuildProfileProvider({
   }, [])
 
   useEffect(() => {
+    if (initialProfile != null) return
     void refreshProfile()
-  }, [refreshProfile])
+  }, [refreshProfile, initialProfile])
 
   useEffect(() => {
     const supabase = tryCreateClient()

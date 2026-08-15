@@ -39,20 +39,20 @@ export async function fetchFinanceSummaryForGuild(
 ): Promise<FinanceSummary> {
   const [
     financeData,
-    settingsRes,
     movements,
     receipts,
     revenueItems,
+    checkpoint,
     settlementsRes,
     mgmtRes,
     duesRes,
     memberNamesRes,
   ] = await Promise.all([
     fetchFinanceOperationalData(supabase),
-    supabase.from("guild_finance_settings").select("rounding_remainder_balance").maybeSingle(),
     fetchGuildCashMovements(supabase, guildId),
     fetchSettlementRevenueReceipts(supabase, guildId),
     fetchSettlementRevenueItems(supabase, guildId),
+    fetchLatestGuildCashCheckpoint(supabase, guildId),
     supabase.from("settlements").select("*").eq("guild_id", guildId),
     supabase.from("settlement_management_payments").select("*").eq("guild_id", guildId),
     supabase.from("dues").select("*").eq("guild_id", guildId),
@@ -63,7 +63,6 @@ export async function fetchFinanceSummaryForGuild(
   if (mgmtRes.error) throw mgmtRes.error
   if (duesRes.error) throw duesRes.error
   if (memberNamesRes.error) throw memberNamesRes.error
-  if (settingsRes.error) throw settingsRes.error
 
   const settlementRows = (settlementsRes.data ?? []) as SettlementRow[]
   const settlementIdList = settlementRows.map((s) => s.id)
@@ -181,12 +180,8 @@ export async function fetchFinanceSummaryForGuild(
       status: m.status,
     }))
 
-  const checkpoint = await fetchLatestGuildCashCheckpoint(supabase, guildId)
   const ledgerEntries = (financeData.entries ?? []).map(ledgerEntryToGuildFundEntry)
-
-  const roundingRemainder = Number(
-    (settingsRes.data as { rounding_remainder_balance?: number } | null)?.rounding_remainder_balance ?? 0,
-  )
+  const roundingRemainder = financeData.roundingRemainderBalance
 
   return computeFinanceSummary({
     checkpoint,

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Clock, Users, CheckCircle2, XCircle, Timer, Star } from "lucide-react"
 import { SectionTitle, Badge, Card } from "@/components/ui-bits"
 import { BossSpawnBadges } from "@/components/boss-spawn-badges"
@@ -16,10 +16,15 @@ import { cn } from "@/lib/utils"
 const filters = ["전체", "참여", "미참여", "대기"] as const
 
 export function BossScreen() {
-  const { slots, getCheck, getMemberSlotStatus, getMemberContributionTotal } = useParticipation()
+  const { slots, getCheck, getMemberSlotStatus, getMemberContributionTotal, ensureFullBossDataLoaded } =
+    useParticipation()
   const { getMemberSiegeContributionTotal } = useSiege()
   const memberId = useCurrentMemberId()
   const [filter, setFilter] = useState<(typeof filters)[number]>("전체")
+
+  useEffect(() => {
+    void ensureFullBossDataLoaded()
+  }, [ensureFullBossDataLoaded])
 
   const list = slots.filter((slot) => {
     const status = getMemberSlotStatus(slot.id, memberId)

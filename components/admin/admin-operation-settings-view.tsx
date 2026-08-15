@@ -64,21 +64,9 @@ export function AdminOperationSettingsView({ onNavigate }: Props) {
   const [effectiveFromTime, setEffectiveFromTime] = useState("00:00")
   const [saving, setSaving] = useState(false)
 
-  const load = useCallback(async () => {
-    const res = await fetch("/api/admin/operation-settings")
-    const data = (await res.json()) as {
-      ok: boolean
-      policyView?: GuildOperationPolicyView
-      activeMembers?: ActiveMemberOption[]
-      message?: string
-    }
-    if (!data.ok || !data.policyView) {
-      alert(data.message ?? "운영 정책을 불러오지 못했습니다.")
-      return
-    }
-    setPolicyView(data.policyView)
-    setActiveMembers(data.activeMembers ?? [])
-    const s = data.policyView.settings
+  const applyPolicyView = useCallback((view: GuildOperationPolicyView) => {
+    setPolicyView(view)
+    const s = view.settings
     setManagementFeeMode(s.managementFeeMode)
     setManagementFeePercentage(
       s.managementFeePercentage != null ? String(s.managementFeePercentage) : "",
@@ -93,6 +81,22 @@ export function AdminOperationSettingsView({ onNavigate }: Props) {
       })),
     )
   }, [])
+
+  const load = useCallback(async () => {
+    const res = await fetch("/api/admin/operation-settings")
+    const data = (await res.json()) as {
+      ok: boolean
+      policyView?: GuildOperationPolicyView
+      activeMembers?: ActiveMemberOption[]
+      message?: string
+    }
+    if (!data.ok || !data.policyView) {
+      alert(data.message ?? "운영 정책을 불러오지 못했습니다.")
+      return
+    }
+    applyPolicyView(data.policyView)
+    setActiveMembers(data.activeMembers ?? [])
+  }, [applyPolicyView])
 
   useEffect(() => {
     void load()
@@ -139,12 +143,20 @@ export function AdminOperationSettingsView({ onNavigate }: Props) {
         effectiveFromTime: effectiveFromMode === "scheduled" ? effectiveFromTime : undefined,
       }),
     })
-    const data = (await res.json()) as { ok: boolean; message: string }
+    const data = (await res.json()) as {
+      ok: boolean
+      message: string
+      policyView?: GuildOperationPolicyView
+    }
     setSaving(false)
     alert(data.message)
     if (data.ok) {
       setChangeReason("")
-      await load()
+      if (data.policyView) {
+        applyPolicyView(data.policyView)
+      } else {
+        await load()
+      }
     }
   }
 
@@ -160,9 +172,19 @@ export function AdminOperationSettingsView({ onNavigate }: Props) {
         cancelReason: cancelReason.trim(),
       }),
     })
-    const data = (await res.json()) as { ok: boolean; message: string }
+    const data = (await res.json()) as {
+      ok: boolean
+      message: string
+      policyView?: GuildOperationPolicyView
+    }
     alert(data.message)
-    if (data.ok) await load()
+    if (data.ok) {
+      if (data.policyView) {
+        applyPolicyView(data.policyView)
+      } else {
+        await load()
+      }
+    }
   }
 
   return (

@@ -28,9 +28,19 @@ const EMPTY_VIEW: MemberOperationPolicyPublicView = {
   additionalScheduledCount: 0,
 }
 
-export function OperationPolicyProvider({ children }: { children: ReactNode }) {
+export function OperationPolicyProvider({
+  children,
+  initialPolicyView,
+  skipInitialFetch = false,
+}: {
+  children: ReactNode
+  initialPolicyView?: MemberOperationPolicyPublicView
+  skipInitialFetch?: boolean
+}) {
   const { isAuthenticated } = useAuth()
-  const [policyView, setPolicyView] = useState<MemberOperationPolicyPublicView | null>(null)
+  const [policyView, setPolicyView] = useState<MemberOperationPolicyPublicView | null>(
+    initialPolicyView ?? null,
+  )
   const [isLoading, setIsLoading] = useState(false)
 
   const refreshPolicyView = useCallback(async () => {
@@ -55,10 +65,11 @@ export function OperationPolicyProvider({ children }: { children: ReactNode }) {
   }, [])
 
   useEffect(() => {
+    if (skipInitialFetch) return
     if (isAuthenticated) {
       void refreshPolicyView()
     }
-  }, [isAuthenticated, refreshPolicyView])
+  }, [isAuthenticated, refreshPolicyView, skipInitialFetch])
 
   const value = useMemo(
     () => ({ policyView, isLoading, refreshPolicyView }),

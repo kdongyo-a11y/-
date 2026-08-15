@@ -247,9 +247,11 @@ export async function fetchFinanceOperationalData(supabase: SupabaseClient) {
     expenseRowToExpense(row, logsByExpense.get(row.id) ?? [], ledgerByExpenseSource.get(row.id) ?? null),
   )
 
-  const openingBalance = Number((settingsRes.data as FinanceSettingsRow | null)?.opening_balance ?? 0)
+  const settingsRow = settingsRes.data as FinanceSettingsRow | null
+  const openingBalance = Number(settingsRow?.opening_balance ?? 0)
+  const roundingRemainderBalance = Number(settingsRow?.rounding_remainder_balance ?? 0)
 
-  return { openingBalance, entries, expenses }
+  return { openingBalance, roundingRemainderBalance, entries, expenses }
 }
 
 export async function fetchDuesOperationalData(supabase: SupabaseClient) {

@@ -7,12 +7,13 @@ import { NavigationProvider } from "@/components/navigation-context"
 import { ContributionSettingsProvider } from "@/components/contribution-settings-context"
 import { OperationPolicyProvider } from "@/components/operation-policy-context"
 import { NoticesProvider } from "@/components/notices-context"
-import { GuildLedgerProvider } from "@/components/guild-ledger-context"
+import { GuildLedgerProvider, useGuildLedger } from "@/components/guild-ledger-context"
 import { DuesProvider } from "@/components/dues-context"
-import { ParticipationProvider } from "@/components/participation-context"
-import { SiegeProvider } from "@/components/siege-context"
-import { SettlementProvider } from "@/components/settlement-context"
-import { MembersProvider } from "@/components/members-context"
+import { ParticipationProvider, useParticipation } from "@/components/participation-context"
+import { SiegeProvider, useSiege } from "@/components/siege-context"
+import { SettlementProvider, useSettlement } from "@/components/settlement-context"
+import { MembersProvider, useMembers } from "@/components/members-context"
+import { HomeBootstrapProvider, useHomeBootstrap } from "@/components/home-bootstrap-context"
 import { HomeScreen } from "@/components/screens/home-screen"
 import { BossScreen } from "@/components/screens/boss-screen"
 import { RecordsScreen } from "@/components/screens/records-screen"
@@ -34,6 +35,41 @@ const titles: Record<TabKey, string> = {
   admin: "관리자",
 }
 
+function TabDataLoader({ tab }: { tab: TabKey }) {
+  const { ensureFullBossDataLoaded } = useParticipation()
+  const { ensureFullSiegeDataLoaded } = useSiege()
+  const { ensureFullSettlementsLoaded } = useSettlement()
+  const { ensureFinanceLoaded } = useGuildLedger()
+  const { ensureFullMembersLoaded } = useMembers()
+
+  useEffect(() => {
+    if (tab === "boss") {
+      void ensureFullBossDataLoaded()
+    }
+    if (tab === "boss" || tab === "records" || tab === "admin") {
+      void ensureFullSettlementsLoaded()
+    }
+    if (tab === "records" || tab === "boss") {
+      void ensureFullSiegeDataLoaded()
+    }
+    if (tab === "ledger" || tab === "admin") {
+      void ensureFinanceLoaded()
+    }
+    if (tab === "admin" || tab === "profile") {
+      void ensureFullMembersLoaded()
+    }
+  }, [
+    tab,
+    ensureFullBossDataLoaded,
+    ensureFullSiegeDataLoaded,
+    ensureFullSettlementsLoaded,
+    ensureFinanceLoaded,
+    ensureFullMembersLoaded,
+  ])
+
+  return null
+}
+
 function PageContent() {
   const [tab, setTab] = useState<TabKey>("home")
   const { canAccessAdmin, currentMemberId } = useAuth()
@@ -50,6 +86,7 @@ function PageContent() {
 
   return (
     <NavigationProvider navigate={setTab}>
+      <TabDataLoader tab={tab} />
       <AppShell active={tab} onTabChange={setTab} title={titles[tab]}>
         {tab === "home" && <HomeScreen />}
         {tab === "boss" && <BossScreen />}
@@ -59,6 +96,58 @@ function PageContent() {
         {tab === "admin" && canAccessAdmin && <AdminScreen />}
       </AppShell>
     </NavigationProvider>
+  )
+}
+
+function BootstrapAppProviders({ children }: { children: React.ReactNode }) {
+  const { bootstrap, isLoading, loadError } = useHomeBootstrap()
+
+  if (isLoading) {
+    return (
+      <div className="mx-auto flex min-h-svh max-w-md items-center justify-center px-4">
+        <p className="text-sm text-muted-foreground">홈 데이터를 불러오는 중…</p>
+      </div>
+    )
+  }
+
+  if (loadError || !bootstrap) {
+    return (
+      <div className="mx-auto flex min-h-svh max-w-md flex-col items-center justify-center px-4 text-center">
+        <p className="text-sm text-destructive">{loadError ?? "홈 데이터를 불러오지 못했습니다."}</p>
+      </div>
+    )
+  }
+
+  return (
+    <MembersProvider initialRoster={bootstrap.membersRoster} skipInitialFetch>
+      <GuildLedgerProvider deferInitialLoad>
+        <DuesProvider initialBills={bootstrap.dues.bills} skipInitialFetch>
+          <ContributionSettingsProvider
+            initialSettings={bootstrap.contributionSettings}
+            skipInitialFetch
+          >
+            <OperationPolicyProvider initialPolicyView={bootstrap.policyView} skipInitialFetch>
+              <NoticesProvider initialPreview={bootstrap.noticesPreview} skipInitialFetch>
+                <ParticipationProvider
+                  initialChecks={bootstrap.boss.checks}
+                  initialSlotAdminFlags={bootstrap.boss.slotAdminFlags}
+                  skipInitialFetch
+                >
+                  <SiegeProvider initialSieges={bootstrap.siege.sieges} skipInitialFetch>
+                    <SettlementProvider
+                      initialSettlements={bootstrap.settlementHome.settlements}
+                      skipInitialFetch
+                    >
+                      {children}
+                    </SettlementProvider>
+                  </SiegeProvider>
+                </ParticipationProvider>
+              </NoticesProvider>
+            </OperationPolicyProvider>
+          </ContributionSettingsProvider>
+        </DuesProvider>
+      </GuildLedgerProvider>
+    </MembersProvider>
   )
 }
 
@@ -119,23 +208,11 @@ function AuthenticatedApp() {
   }
 
   return (
-    <GuildLedgerProvider>
-      <DuesProvider>
-        <ContributionSettingsProvider>
-          <OperationPolicyProvider>
-            <NoticesProvider>
-              <ParticipationProvider>
-                <SiegeProvider>
-                  <SettlementProvider>
-                    <PageContent />
-                  </SettlementProvider>
-                </SiegeProvider>
-              </ParticipationProvider>
-            </NoticesProvider>
-          </OperationPolicyProvider>
-        </ContributionSettingsProvider>
-      </DuesProvider>
-    </GuildLedgerProvider>
+    <HomeBootstrapProvider>
+      <BootstrapAppProviders>
+        <PageContent />
+      </BootstrapAppProviders>
+    </HomeBootstrapProvider>
   )
 }
 
@@ -144,9 +221,7 @@ export default function Page() {
     <AuthProvider>
       <GuildProfileAuthSync />
       <TenantProvider>
-        <MembersProvider>
-          <AuthenticatedApp />
-        </MembersProvider>
+        <AuthenticatedApp />
       </TenantProvider>
     </AuthProvider>
   )

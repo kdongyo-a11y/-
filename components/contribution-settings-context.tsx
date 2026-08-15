@@ -25,9 +25,17 @@ type ContributionSettingsContextValue = {
 
 const ContributionSettingsContext = createContext<ContributionSettingsContextValue | null>(null)
 
-export function ContributionSettingsProvider({ children }: { children: ReactNode }) {
+export function ContributionSettingsProvider({
+  children,
+  initialSettings,
+  skipInitialFetch = false,
+}: {
+  children: ReactNode
+  initialSettings?: ContributionScoreSetting[]
+  skipInitialFetch?: boolean
+}) {
   const { isAuthenticated } = useAuth()
-  const [settings, setSettings] = useState<ContributionScoreSetting[]>([])
+  const [settings, setSettings] = useState<ContributionScoreSetting[]>(initialSettings ?? [])
   const [isLoading, setIsLoading] = useState(false)
 
   const refreshSettings = useCallback(async () => {
@@ -49,10 +57,11 @@ export function ContributionSettingsProvider({ children }: { children: ReactNode
   }, [])
 
   useEffect(() => {
+    if (skipInitialFetch) return
     if (isAuthenticated) {
       void refreshSettings()
     }
-  }, [isAuthenticated, refreshSettings])
+  }, [isAuthenticated, refreshSettings, skipInitialFetch])
 
   const getScoresForDate = useCallback(
     (eventDate: string) => resolveContributionScoresForDate(settings, eventDate),

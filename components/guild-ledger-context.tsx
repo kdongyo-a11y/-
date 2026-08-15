@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react"
@@ -49,6 +50,7 @@ type GuildLedgerContextValue = {
   isLoading: boolean
   loadError: string | null
   refreshFinance: () => Promise<void>
+  ensureFinanceLoaded: () => Promise<void>
   addSettlementLedgerEntries: (params: {
     label: string
     category?: string
@@ -106,12 +108,19 @@ function toGuildFundEntries(entries: LedgerEntry[]): GuildFundLedgerEntry[] {
   }))
 }
 
-export function GuildLedgerProvider({ children }: { children: ReactNode }) {
+export function GuildLedgerProvider({
+  children,
+  deferInitialLoad = false,
+}: {
+  children: ReactNode
+  deferInitialLoad?: boolean
+}) {
   const [openingBalance, setOpeningBalance] = useState(OPENING_BALANCE)
   const [entries, setEntries] = useState<LedgerEntry[]>([])
   const [expenses, setExpenses] = useState<Expense[]>([])
-  const [isLoading, setIsLoading] = useState(true)
+  const [isLoading, setIsLoading] = useState(!deferInitialLoad)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const financeLoadedRef = useRef(false)
 
   const refreshFinance = useCallback(async () => {
     const result = await fetchFinanceData()
@@ -123,9 +132,18 @@ export function GuildLedgerProvider({ children }: { children: ReactNode }) {
     setOpeningBalance(result.openingBalance ?? OPENING_BALANCE)
     setEntries(result.entries ?? [])
     setExpenses(result.expenses ?? [])
+    financeLoadedRef.current = true
   }, [])
 
+  const ensureFinanceLoaded = useCallback(async () => {
+    if (financeLoadedRef.current) return
+    setIsLoading(true)
+    await refreshFinance()
+    setIsLoading(false)
+  }, [refreshFinance])
+
   useEffect(() => {
+    if (deferInitialLoad) return
     let cancelled = false
     void (async () => {
       setIsLoading(true)
@@ -135,7 +153,7 @@ export function GuildLedgerProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true
     }
-  }, [refreshFinance])
+  }, [refreshFinance, deferInitialLoad])
 
   const guildFund = useMemo(
     () => computeGuildFundFromLedger(openingBalance, toGuildFundEntries(entries)),
@@ -236,6 +254,7 @@ export function GuildLedgerProvider({ children }: { children: ReactNode }) {
       isLoading,
       loadError,
       refreshFinance,
+      ensureFinanceLoaded,
       addSettlementLedgerEntries,
       postDuesIncome,
       reverseDuesIncome,
@@ -259,6 +278,7 @@ export function GuildLedgerProvider({ children }: { children: ReactNode }) {
       isLoading,
       loadError,
       refreshFinance,
+      ensureFinanceLoaded,
       addSettlementLedgerEntries,
       postDuesIncome,
       reverseDuesIncome,

@@ -1,6 +1,15 @@
 import type { SlotAdminFlags } from "@/lib/boss-admin-status"
 import type { SlotCheck } from "@/components/participation-context"
 import type { SiegeEvent } from "@/components/siege-context"
+import type { BossSlotPatchResponse } from "@/lib/home-bootstrap-types"
+
+export type BossMutationResult = {
+  ok: boolean
+  message: string
+  slotId?: string
+  patch?: BossSlotPatchResponse
+  results?: Array<{ memberId: string; ok: boolean; message: string }>
+}
 
 async function postJson<T>(url: string, body: unknown): Promise<T> {
   const res = await fetch(url, {
@@ -11,45 +20,50 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
   return (await res.json()) as T
 }
 
-export async function fetchBossEvents(): Promise<{
+export async function fetchBossEvents(scope: "home" | "full" = "full"): Promise<{
   ok: boolean
   checks?: Record<string, SlotCheck>
   slotAdminFlags?: Record<string, SlotAdminFlags>
   message?: string
 }> {
-  const res = await fetch("/api/boss/events")
+  const res = await fetch(`/api/boss/events?scope=${scope}`)
   return res.json()
 }
 
-export async function fetchSiegeEvents(): Promise<{
+export async function fetchSiegeEvents(scope: "home" | "full" = "full"): Promise<{
   ok: boolean
   sieges?: SiegeEvent[]
   message?: string
 }> {
-  const res = await fetch("/api/siege/events")
+  const res = await fetch(`/api/siege/events?scope=${scope}`)
   return res.json()
 }
 
 export const bossApi = {
   startCheck: (slotId: string) =>
-    postJson<{ ok: boolean; message: string }>("/api/boss/check/start", { slotId }),
+    postJson<BossMutationResult>("/api/boss/check/start", { slotId }),
   closeCheck: (slotId: string) =>
-    postJson<{ ok: boolean; message: string }>("/api/boss/check/close", { slotId }),
+    postJson<BossMutationResult>("/api/boss/check/close", { slotId }),
   regenerateCode: (slotId: string) =>
-    postJson<{ ok: boolean; message: string }>("/api/boss/check/regenerate-code", { slotId }),
+    postJson<BossMutationResult>("/api/boss/check/regenerate-code", { slotId }),
   joinByCode: (code: string) =>
-    postJson<{ ok: boolean; message: string }>("/api/boss/participations/join", { code }),
+    postJson<BossMutationResult>("/api/boss/participations/join", { code }),
   manualParticipation: (input: {
     slotId: string
     memberId: string
     memo: string
     action: "add" | "remove"
-  }) => postJson<{ ok: boolean; message: string }>("/api/boss/participations/manual", input),
+  }) => postJson<BossMutationResult>("/api/boss/participations/manual", input),
+  manualParticipationBatch: (input: {
+    slotId: string
+    memo: string
+    batch: Array<{ memberId: string; action: "add" | "remove"; memo?: string }>
+  }) => postJson<BossMutationResult>("/api/boss/participations/manual", input),
   updateEvent: (input: {
     slotId: string
     action: "extra_bosses" | "no_income" | "declare_income" | "cancel_no_income"
     extraMainBosses?: string[]
-  }) => postJson<{ ok: boolean; message: string }>("/api/boss/events/update", input),
+  }) => postJson<BossMutationResult>("/api/boss/events/update", input),
 }
 
 export const siegeApi = {

@@ -12,6 +12,8 @@ import { getSlotConfig } from "@/lib/boss-time-slots"
 import { formatDbError } from "@/lib/supabase/db-errors"
 import { actorGuildId } from "@/lib/supabase/guild-scope-helpers"
 import { recordUsageEventFromActor } from "@/lib/platform/usage-events"
+import { fetchBossPatchAfterStartCheck } from "@/lib/supabase/boss-slot-delta"
+import { PerfTimer } from "@/lib/perf-log"
 
 async function hasBossSettlement(
   admin: ReturnType<typeof import("@/lib/supabase/admin").createAdminClient>,
@@ -36,9 +38,11 @@ async function hasBossSettlement(
 }
 
 export async function POST(request: Request) {
+  const perf = new PerfTimer("boss-check-start")
   try {
     const supabase = await createClient()
-    const authResult = await requireAuthenticatedMember(supabase)
+    const authResult = await perf.measure("authMs", () => requireAuthenticatedMember(supabase))
+    perf.addDbCalls(2)
     if ("error" in authResult) {
       return NextResponse.json(
         { ok: false, message: authResult.error },
@@ -97,8 +101,11 @@ export async function POST(request: Request) {
       )
     }
 
+    const closedEventIds: string[] = []
+
     for (const open of openEvents ?? []) {
       if (slotIdFromEvent(open) === body.slotId) continue
+      closedEventIds.push(open.id)
       const { error: closeError } = await admin
         .from("boss_events")
         .update({
@@ -199,9 +206,24 @@ export async function POST(request: Request) {
       admin,
     )
 
-    return NextResponse.json({ ok: true, message: "참여체크를 시작했습니다." })
+    const patch = await fetchBossPatchAfterStartCheck(
+      admin,
+      guildId,
+      body.slotId,
+      closedEventIds,
+    )
+    perf.addDbCalls(3 + closedEventIds.length)
+    perf.finish({ ok: true, closedCount: closedEventIds.length })
+
+    return NextResponse.json({
+      ok: true,
+      message: "참여체크를 시작했습니다.",
+      slotId: body.slotId,
+      patch,
+    })
   } catch (error) {
     console.error("[boss/check/start]", error)
+    perf.finish({ ok: false, reason: "error" })
     return NextResponse.json(
       { ok: false, message: "참여체크 시작 중 오류가 발생했습니다." },
       { status: 500 },

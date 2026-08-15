@@ -20,9 +20,17 @@ type NoticesContextValue = {
 
 const NoticesContext = createContext<NoticesContextValue | null>(null)
 
-export function NoticesProvider({ children }: { children: ReactNode }) {
+export function NoticesProvider({
+  children,
+  initialPreview,
+  skipInitialFetch = false,
+}: {
+  children: ReactNode
+  initialPreview?: MemberNoticePublic[]
+  skipInitialFetch?: boolean
+}) {
   const { isAuthenticated } = useAuth()
-  const [homePreview, setHomePreview] = useState<MemberNoticePublic[]>([])
+  const [homePreview, setHomePreview] = useState<MemberNoticePublic[]>(initialPreview ?? [])
   const [isLoading, setIsLoading] = useState(false)
 
   const refreshHomePreview = useCallback(async () => {
@@ -44,10 +52,11 @@ export function NoticesProvider({ children }: { children: ReactNode }) {
   }, [])
 
   useEffect(() => {
+    if (skipInitialFetch) return
     if (isAuthenticated) {
       void refreshHomePreview()
     }
-  }, [isAuthenticated, refreshHomePreview])
+  }, [isAuthenticated, refreshHomePreview, skipInitialFetch])
 
   const value = useMemo(
     () => ({ homePreview, isLoading, refreshHomePreview }),

@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { requireAuthenticatedMember } from "@/lib/supabase/auth-helpers"
 import { requireManagerOrAdmin } from "@/lib/supabase/operation-auth"
 import { getBossEventBySlotId } from "@/lib/supabase/boss-event-helpers"
+import { fetchBossSlotPatch } from "@/lib/supabase/boss-slot-delta"
 import { actorGuildId } from "@/lib/supabase/guild-scope-helpers"
 
 export async function POST(request: Request) {
@@ -53,7 +54,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, message: "마감에 실패했습니다." }, { status: 500 })
     }
 
-    return NextResponse.json({ ok: true, message: "참여체크를 마감했습니다." })
+    const patch = await fetchBossSlotPatch(admin, guildId, body.slotId)
+
+    return NextResponse.json({
+      ok: true,
+      message: "참여체크를 마감했습니다.",
+      slotId: body.slotId,
+      patch,
+    })
   } catch (error) {
     console.error("[boss/check/close]", error)
     return NextResponse.json(

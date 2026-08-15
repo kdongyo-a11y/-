@@ -5,7 +5,6 @@ import type {
   GuildCashMovement,
   GuildCashMovementRow,
 } from "@/lib/guild-cash-types"
-import { selectLatestCheckpoint } from "@/lib/guild-cash-utils"
 
 function mapCheckpointRow(row: GuildCashCheckpointRow): GuildCashCheckpoint {
   return {
@@ -55,8 +54,18 @@ export async function fetchLatestGuildCashCheckpoint(
   guildId: string,
   asOf: Date = new Date(),
 ): Promise<GuildCashCheckpoint | null> {
-  const checkpoints = await fetchGuildCashCheckpoints(supabase, guildId)
-  return selectLatestCheckpoint(checkpoints, asOf)
+  const { data, error } = await supabase
+    .from("guild_cash_checkpoints")
+    .select("*")
+    .eq("guild_id", guildId)
+    .lte("effective_at", asOf.toISOString())
+    .order("effective_at", { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (error) throw error
+  if (!data) return null
+  return mapCheckpointRow(data as GuildCashCheckpointRow)
 }
 
 export async function fetchGuildCashMovements(

@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react"
@@ -60,6 +61,7 @@ type MembersContextValue = {
   getStats: () => ReturnType<typeof getMemberStats>
   isNicknameTaken: (nickname: string, excludeId?: string) => boolean
   refreshMembers: () => Promise<void>
+  ensureFullMembersLoaded: () => Promise<void>
   addMember: (
     input: AddMemberInput,
     actorMemberId?: string,
@@ -103,12 +105,22 @@ function validateCharacterClass(value: string): value is MemberCharacterClass {
   return (MEMBER_CHARACTER_CLASSES as readonly string[]).includes(value)
 }
 
-export function MembersProvider({ children }: { children: ReactNode }) {
+export function MembersProvider({
+  children,
+  initialRoster,
+  skipInitialFetch = false,
+}: {
+  children: ReactNode
+  initialRoster?: RosterMember[]
+  skipInitialFetch?: boolean
+}) {
   const { isAuthenticated, isHydrated } = useAuth()
   const [members, setMembers] = useState<Member[]>([])
+  const [rosterMembers, setRosterMembers] = useState<RosterMember[]>(initialRoster ?? [])
   const [isLoading, setIsLoading] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [changeLogs, setChangeLogs] = useState<AdminChangeLog[]>([])
+  const fullMembersLoadedRef = useRef(false)
 
   const supabase = useMemo(() => tryCreateClient(), [])
 
@@ -134,16 +146,28 @@ export function MembersProvider({ children }: { children: ReactNode }) {
     }
 
     setMembers((data as MemberRow[]).map(rowToMember))
+    setRosterMembers(
+      (data as MemberRow[])
+        .filter((m) => m.status === "활동")
+        .map((m) => ({ id: m.id, nickname: m.nickname })),
+    )
+    fullMembersLoadedRef.current = true
   }, [supabase, isAuthenticated])
+
+  const ensureFullMembersLoaded = useCallback(async () => {
+    if (fullMembersLoadedRef.current && members.length > 0) return
+    await refreshMembers()
+  }, [refreshMembers, members.length])
 
   useEffect(() => {
     if (!isHydrated) return
+    if (skipInitialFetch) return
     if (isAuthenticated) {
       void refreshMembers()
     } else {
       setMembers([])
     }
-  }, [isHydrated, isAuthenticated, refreshMembers])
+  }, [isHydrated, isAuthenticated, refreshMembers, skipInitialFetch])
 
   const getMember = useCallback(
     (id: string) => members.find((m) => m.id === id),
@@ -156,8 +180,11 @@ export function MembersProvider({ children }: { children: ReactNode }) {
   )
 
   const getRosterMembers = useCallback((): RosterMember[] => {
-    return getActiveMembers().map((m) => ({ id: m.id, nickname: m.nickname }))
-  }, [getActiveMembers])
+    if (members.length > 0) {
+      return getActiveMembers().map((m) => ({ id: m.id, nickname: m.nickname }))
+    }
+    return rosterMembers
+  }, [getActiveMembers, members.length, rosterMembers])
 
   const getStats = useCallback(() => getMemberStats(members), [members])
 
@@ -426,6 +453,7 @@ export function MembersProvider({ children }: { children: ReactNode }) {
       getStats,
       isNicknameTaken,
       refreshMembers,
+      ensureFullMembersLoaded,
       addMember,
       updateMember,
       updateOwnProfile,
@@ -444,6 +472,7 @@ export function MembersProvider({ children }: { children: ReactNode }) {
       getStats,
       isNicknameTaken,
       refreshMembers,
+      ensureFullMembersLoaded,
       addMember,
       updateMember,
       updateOwnProfile,

@@ -22,6 +22,7 @@ import {
   type SlotAdminFlags,
 } from "@/lib/boss-admin-status"
 import { bossApi, fetchBossEvents } from "@/lib/operations-api"
+import type { BossSlotPatchResponse } from "@/lib/home-bootstrap-types"
 
 export type AttendeeMethod = "코드" | "수동추가"
 
@@ -113,6 +114,8 @@ type ParticipationContextValue = {
   isLoading: boolean
   loadError: string | null
   retryLoad: () => Promise<void>
+  ensureFullBossDataLoaded: () => Promise<void>
+  applyBossPatch: (patch?: BossSlotPatchResponse) => void
 }
 
 const ParticipationContext = createContext<ParticipationContextValue | null>(null)
@@ -134,17 +137,40 @@ function ensureCheck(checks: Record<string, SlotCheck>, slotId: string): SlotChe
   return checks[slotId] ?? createEmptyCheck(slotId)
 }
 
-export function ParticipationProvider({ children }: { children: ReactNode }) {
+export function ParticipationProvider({
+  children,
+  initialChecks,
+  initialSlotAdminFlags,
+  skipInitialFetch = false,
+}: {
+  children: ReactNode
+  initialChecks?: Record<string, SlotCheck>
+  initialSlotAdminFlags?: Record<string, SlotAdminFlags>
+  skipInitialFetch?: boolean
+}) {
   const currentMemberId = useCurrentMemberId()
   const today = getTodayDateString()
   const [slots] = useState<BossTimeSlot[]>(() => generateDaySlots(today))
-  const [checks, setChecks] = useState<Record<string, SlotCheck>>({})
-  const [slotAdminFlags, setSlotAdminFlags] = useState<Record<string, SlotAdminFlags>>({})
-  const [isLoading, setIsLoading] = useState(true)
+  const [checks, setChecks] = useState<Record<string, SlotCheck>>(initialChecks ?? {})
+  const [slotAdminFlags, setSlotAdminFlags] = useState<Record<string, SlotAdminFlags>>(
+    initialSlotAdminFlags ?? {},
+  )
+  const [isLoading, setIsLoading] = useState(!skipInitialFetch)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const fullBossDataLoadedRef = useRef(false)
 
-  const refreshBossData = useCallback(async () => {
-    const result = await fetchBossEvents()
+  const patchBossSlots = useCallback((patch?: BossSlotPatchResponse) => {
+    if (!patch) return
+    if (Object.keys(patch.checks).length > 0) {
+      setChecks((prev) => ({ ...prev, ...patch.checks }))
+    }
+    if (Object.keys(patch.slotAdminFlags).length > 0) {
+      setSlotAdminFlags((prev) => ({ ...prev, ...patch.slotAdminFlags }))
+    }
+  }, [])
+
+  const refreshBossData = useCallback(async (scope: "home" | "full" = "full") => {
+    const result = await fetchBossEvents(scope)
     if (!result.ok) {
       setLoadError(result.message ?? "보스타임 기록을 불러오지 못했습니다.")
       return
@@ -152,25 +178,37 @@ export function ParticipationProvider({ children }: { children: ReactNode }) {
     setLoadError(null)
     setChecks(result.checks ?? {})
     setSlotAdminFlags(result.slotAdminFlags ?? {})
+    if (scope === "full") {
+      fullBossDataLoadedRef.current = true
+    }
   }, [])
+
+  const ensureFullBossDataLoaded = useCallback(async () => {
+    if (fullBossDataLoadedRef.current) return
+    await refreshBossData("full")
+  }, [refreshBossData])
 
   const retryLoad = useCallback(async () => {
     setIsLoading(true)
-    await refreshBossData()
+    await refreshBossData("full")
     setIsLoading(false)
   }, [refreshBossData])
 
   useEffect(() => {
+    if (skipInitialFetch) {
+      setIsLoading(false)
+      return
+    }
     let cancelled = false
     void (async () => {
       setIsLoading(true)
-      await refreshBossData()
+      await refreshBossData("full")
       if (!cancelled) setIsLoading(false)
     })()
     return () => {
       cancelled = true
     }
-  }, [refreshBossData])
+  }, [refreshBossData, skipInitialFetch])
 
   const checksRef = useRef(checks)
   checksRef.current = checks
@@ -298,10 +336,10 @@ export function ParticipationProvider({ children }: { children: ReactNode }) {
         alert(result.message)
         return result
       }
-      await refreshBossData()
+      patchBossSlots(result.patch)
       return result
     },
-    [refreshBossData],
+    [patchBossSlots],
   )
 
   const closeCheck = useCallback(
@@ -311,9 +349,9 @@ export function ParticipationProvider({ children }: { children: ReactNode }) {
         alert(result.message)
         return
       }
-      await refreshBossData()
+      patchBossSlots(result.patch)
     },
-    [refreshBossData],
+    [patchBossSlots],
   )
 
   const regenerateCode = useCallback(
@@ -323,9 +361,9 @@ export function ParticipationProvider({ children }: { children: ReactNode }) {
         alert(result.message)
         return
       }
-      await refreshBossData()
+      patchBossSlots(result.patch)
     },
-    [refreshBossData],
+    [patchBossSlots],
   )
 
   const addAttendeeManual = useCallback(
@@ -336,10 +374,10 @@ export function ParticipationProvider({ children }: { children: ReactNode }) {
         memo,
         action: "add",
       })
-      if (result.ok) await refreshBossData()
+      if (result.ok) patchBossSlots(result.patch)
       return result
     },
-    [refreshBossData],
+    [patchBossSlots],
   )
 
   const removeAttendeeManual = useCallback(
@@ -350,24 +388,24 @@ export function ParticipationProvider({ children }: { children: ReactNode }) {
         memo,
         action: "remove",
       })
-      if (result.ok) await refreshBossData()
+      if (result.ok) patchBossSlots(result.patch)
       return result
     },
-    [refreshBossData],
+    [patchBossSlots],
   )
 
   const setExtraMainBosses = useCallback(
     (slotId: string, bosses: string[]) => {
       void (async () => {
-        await bossApi.updateEvent({
+        const result = await bossApi.updateEvent({
           slotId,
           action: "extra_bosses",
           extraMainBosses: bosses,
         })
-        await refreshBossData()
+        if (result.ok) patchBossSlots(result.patch)
       })()
     },
-    [refreshBossData],
+    [patchBossSlots],
   )
 
   const getSlotAdminFlags = useCallback(
@@ -384,10 +422,10 @@ export function ParticipationProvider({ children }: { children: ReactNode }) {
         return { ok: false, message: "참여체크 마감 후 수익 없음으로 마감할 수 있습니다." }
       }
       const result = await bossApi.updateEvent({ slotId, action: "no_income" })
-      if (result.ok) await refreshBossData()
+      if (result.ok) patchBossSlots(result.patch)
       return result
     },
-    [refreshBossData],
+    [patchBossSlots],
   )
 
   const declareSlotIncome = useCallback(
@@ -401,10 +439,10 @@ export function ParticipationProvider({ children }: { children: ReactNode }) {
         return { ok: false, message: "이미 수익 없음으로 마감된 타임입니다." }
       }
       const result = await bossApi.updateEvent({ slotId, action: "declare_income" })
-      if (result.ok) await refreshBossData()
+      if (result.ok) patchBossSlots(result.patch)
       return result
     },
-    [slotAdminFlags, refreshBossData],
+    [slotAdminFlags, patchBossSlots],
   )
 
   const cancelNoIncomeSlot = useCallback(
@@ -414,21 +452,21 @@ export function ParticipationProvider({ children }: { children: ReactNode }) {
         return { ok: false, message: "수익 없음으로 마감된 타임만 취소할 수 있습니다." }
       }
       const result = await bossApi.updateEvent({ slotId, action: "cancel_no_income" })
-      if (result.ok) await refreshBossData()
+      if (result.ok) patchBossSlots(result.patch)
       return result
     },
-    [slotAdminFlags, refreshBossData],
+    [slotAdminFlags, patchBossSlots],
   )
 
   const submitCode = useCallback(
     async (code: string): Promise<{ ok: boolean; message: string }> => {
       const result = await bossApi.joinByCode(code)
       if (result.ok) {
-        await refreshBossData()
+        patchBossSlots(result.patch)
       }
       return result
     },
-    [refreshBossData],
+    [patchBossSlots],
   )
 
   const value = useMemo<ParticipationContextValue>(
@@ -459,6 +497,8 @@ export function ParticipationProvider({ children }: { children: ReactNode }) {
       isLoading,
       loadError,
       retryLoad,
+      ensureFullBossDataLoaded,
+      applyBossPatch: patchBossSlots,
     }),
     [
       slots,
@@ -487,6 +527,8 @@ export function ParticipationProvider({ children }: { children: ReactNode }) {
       isLoading,
       loadError,
       retryLoad,
+      ensureFullBossDataLoaded,
+      patchBossSlots,
     ],
   )
 
