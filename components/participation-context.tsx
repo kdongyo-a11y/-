@@ -23,6 +23,8 @@ import {
 } from "@/lib/boss-admin-status"
 import { bossApi, fetchBossEvents } from "@/lib/operations-api"
 import type { BossSlotPatchResponse } from "@/lib/home-bootstrap-types"
+import { mergeBossSlotPatch } from "@/lib/boss-patch-utils"
+import { trackInteraction } from "@/lib/interaction-perf"
 
 export type AttendeeMethod = "코드" | "수동추가"
 
@@ -91,8 +93,8 @@ type ParticipationContextValue = {
   getMemberContributionRecords: (memberId: string) => ContributionRecord[]
   // 관리자
   startCheck: (slotId: string) => Promise<{ ok: boolean; message: string }>
-  closeCheck: (slotId: string) => void
-  regenerateCode: (slotId: string) => void
+  closeCheck: (slotId: string) => Promise<void>
+  regenerateCode: (slotId: string) => Promise<void>
   addAttendeeManual: (
     slotId: string,
     member: RosterMember,
@@ -116,6 +118,7 @@ type ParticipationContextValue = {
   retryLoad: () => Promise<void>
   ensureFullBossDataLoaded: () => Promise<void>
   applyBossPatch: (patch?: BossSlotPatchResponse) => void
+  isMutationPending: (key: string) => boolean
 }
 
 const ParticipationContext = createContext<ParticipationContextValue | null>(null)
@@ -158,15 +161,33 @@ export function ParticipationProvider({
   const [isLoading, setIsLoading] = useState(!skipInitialFetch)
   const [loadError, setLoadError] = useState<string | null>(null)
   const fullBossDataLoadedRef = useRef(false)
+  const [pendingMutations, setPendingMutations] = useState<Set<string>>(() => new Set())
+  const extraBossLatestRef = useRef<Map<string, string[]>>(new Map())
+
+  const setMutationPending = useCallback((key: string, pending: boolean) => {
+    setPendingMutations((prev) => {
+      const next = new Set(prev)
+      if (pending) next.add(key)
+      else next.delete(key)
+      return next
+    })
+  }, [])
+
+  const isMutationPending = useCallback(
+    (key: string) => pendingMutations.has(key),
+    [pendingMutations],
+  )
 
   const patchBossSlots = useCallback((patch?: BossSlotPatchResponse) => {
     if (!patch) return
-    if (Object.keys(patch.checks).length > 0) {
-      setChecks((prev) => ({ ...prev, ...patch.checks }))
-    }
-    if (Object.keys(patch.slotAdminFlags).length > 0) {
-      setSlotAdminFlags((prev) => ({ ...prev, ...patch.slotAdminFlags }))
-    }
+    setChecks((prevChecks) => {
+      if (Object.keys(patch.checks).length === 0) return prevChecks
+      return mergeBossSlotPatch(prevChecks, {}, patch).checks
+    })
+    setSlotAdminFlags((prevFlags) => {
+      if (Object.keys(patch.slotAdminFlags).length === 0) return prevFlags
+      return mergeBossSlotPatch({}, prevFlags, patch).slotAdminFlags
+    })
   }, [])
 
   const refreshBossData = useCallback(async (scope: "home" | "full" = "full") => {
@@ -331,81 +352,199 @@ export function ParticipationProvider({
 
   const startCheck = useCallback(
     async (slotId: string): Promise<{ ok: boolean; message: string }> => {
-      const result = await bossApi.startCheck(slotId)
-      if (!result.ok) {
-        alert(result.message)
-        return result
+      const key = `boss-start:${slotId}`
+      if (pendingMutations.has(key)) {
+        return { ok: false, message: "처리 중입니다." }
       }
-      patchBossSlots(result.patch)
-      return result
+      const tracker = trackInteraction("boss-check-start")
+      tracker.markPending()
+      setMutationPending(key, true)
+      try {
+        const result = await bossApi.startCheck(slotId)
+        if (!result.ok) {
+          alert(result.message)
+          tracker.finish({ ok: false })
+          return result
+        }
+        patchBossSlots(result.patch)
+        tracker.finish({ ok: true })
+        return result
+      } catch {
+        tracker.finish({ error: true })
+        return { ok: false, message: "처리 중 오류가 발생했습니다." }
+      } finally {
+        setMutationPending(key, false)
+      }
     },
-    [patchBossSlots],
+    [patchBossSlots, pendingMutations, setMutationPending],
   )
 
   const closeCheck = useCallback(
     async (slotId: string) => {
-      const result = await bossApi.closeCheck(slotId)
-      if (!result.ok) {
-        alert(result.message)
-        return
+      const key = `boss-close:${slotId}`
+      if (pendingMutations.has(key)) return
+      const tracker = trackInteraction("boss-check-close")
+      tracker.markPending()
+      setMutationPending(key, true)
+      try {
+        const result = await bossApi.closeCheck(slotId)
+        if (!result.ok) {
+          alert(result.message)
+          tracker.finish({ ok: false })
+          return
+        }
+        patchBossSlots(result.patch)
+        tracker.finish({ ok: true })
+      } catch {
+        tracker.finish({ error: true })
+      } finally {
+        setMutationPending(key, false)
       }
-      patchBossSlots(result.patch)
     },
-    [patchBossSlots],
+    [patchBossSlots, pendingMutations, setMutationPending],
   )
 
   const regenerateCode = useCallback(
     async (slotId: string) => {
-      const result = await bossApi.regenerateCode(slotId)
-      if (!result.ok) {
-        alert(result.message)
-        return
+      const key = `boss-regenerate:${slotId}`
+      if (pendingMutations.has(key)) return
+      const tracker = trackInteraction("boss-regenerate-code")
+      tracker.markPending()
+      setMutationPending(key, true)
+      try {
+        const result = await bossApi.regenerateCode(slotId)
+        if (!result.ok) {
+          alert(result.message)
+          tracker.finish({ ok: false })
+          return
+        }
+        patchBossSlots(result.patch)
+        tracker.finish({ ok: true })
+      } catch {
+        tracker.finish({ error: true })
+      } finally {
+        setMutationPending(key, false)
       }
-      patchBossSlots(result.patch)
     },
-    [patchBossSlots],
+    [patchBossSlots, pendingMutations, setMutationPending],
   )
 
   const addAttendeeManual = useCallback(
     async (slotId: string, member: RosterMember, memo: string) => {
-      const result = await bossApi.manualParticipation({
-        slotId,
-        memberId: member.id,
-        memo,
-        action: "add",
-      })
-      if (result.ok) patchBossSlots(result.patch)
-      return result
+      const key = `boss-manual:${slotId}`
+      if (pendingMutations.has(key)) {
+        return { ok: false, message: "처리 중입니다." }
+      }
+      const tracker = trackInteraction("boss-manual-add")
+      tracker.markPending()
+      setMutationPending(key, true)
+      try {
+        const result = await bossApi.manualParticipation({
+          slotId,
+          memberId: member.id,
+          memo,
+          action: "add",
+        })
+        if (result.ok) patchBossSlots(result.patch)
+        tracker.finish({ ok: result.ok })
+        return result
+      } catch {
+        tracker.finish({ error: true })
+        return { ok: false, message: "처리 중 오류가 발생했습니다." }
+      } finally {
+        setMutationPending(key, false)
+      }
     },
-    [patchBossSlots],
+    [patchBossSlots, pendingMutations, setMutationPending],
   )
 
   const removeAttendeeManual = useCallback(
     async (slotId: string, member: RosterMember, memo: string) => {
-      const result = await bossApi.manualParticipation({
-        slotId,
-        memberId: member.id,
-        memo,
-        action: "remove",
-      })
-      if (result.ok) patchBossSlots(result.patch)
-      return result
+      const key = `boss-manual:${slotId}`
+      if (pendingMutations.has(key)) {
+        return { ok: false, message: "처리 중입니다." }
+      }
+      const tracker = trackInteraction("boss-manual-remove")
+      tracker.markPending()
+      setMutationPending(key, true)
+      try {
+        const result = await bossApi.manualParticipation({
+          slotId,
+          memberId: member.id,
+          memo,
+          action: "remove",
+        })
+        if (result.ok) patchBossSlots(result.patch)
+        tracker.finish({ ok: result.ok })
+        return result
+      } catch {
+        tracker.finish({ error: true })
+        return { ok: false, message: "처리 중 오류가 발생했습니다." }
+      } finally {
+        setMutationPending(key, false)
+      }
     },
-    [patchBossSlots],
+    [patchBossSlots, pendingMutations, setMutationPending],
   )
 
   const setExtraMainBosses = useCallback(
     (slotId: string, bosses: string[]) => {
+      const key = `boss-extra-boss:${slotId}`
+      if (pendingMutations.has(key)) return
+
+      const prevBosses = checksRef.current[slotId]?.extraMainBosses ?? []
+      extraBossLatestRef.current.set(slotId, bosses)
+
+      setChecks((prev) => ({
+        ...prev,
+        [slotId]: { ...ensureCheck(prev, slotId), extraMainBosses: bosses },
+      }))
+
+      const tracker = trackInteraction("boss-extra-main-toggle")
+      tracker.markPending()
+      setMutationPending(key, true)
+
       void (async () => {
-        const result = await bossApi.updateEvent({
-          slotId,
-          action: "extra_bosses",
-          extraMainBosses: bosses,
-        })
-        if (result.ok) patchBossSlots(result.patch)
+        try {
+          const result = await bossApi.updateEvent({
+            slotId,
+            action: "extra_bosses",
+            extraMainBosses: bosses,
+          })
+
+          const latest = extraBossLatestRef.current.get(slotId)
+          const stale = latest != null && JSON.stringify(latest) !== JSON.stringify(bosses)
+
+          if (!result.ok) {
+            if (!stale) {
+              setChecks((prev) => ({
+                ...prev,
+                [slotId]: { ...ensureCheck(prev, slotId), extraMainBosses: prevBosses },
+              }))
+            }
+            tracker.finish({ ok: false })
+            return
+          }
+
+          if (result.patch && !stale) {
+            patchBossSlots(result.patch)
+          }
+          tracker.finish({ ok: true })
+        } catch {
+          const latest = extraBossLatestRef.current.get(slotId)
+          if (latest == null || JSON.stringify(latest) === JSON.stringify(bosses)) {
+            setChecks((prev) => ({
+              ...prev,
+              [slotId]: { ...ensureCheck(prev, slotId), extraMainBosses: prevBosses },
+            }))
+          }
+          tracker.finish({ error: true })
+        } finally {
+          setMutationPending(key, false)
+        }
       })()
     },
-    [patchBossSlots],
+    [patchBossSlots, pendingMutations, setMutationPending],
   )
 
   const getSlotAdminFlags = useCallback(
@@ -417,19 +556,32 @@ export function ParticipationProvider({
 
   const closeSlotWithNoIncome = useCallback(
     async (slotId: string): Promise<{ ok: boolean; message: string }> => {
+      const key = `boss-income:${slotId}`
+      if (pendingMutations.has(key)) {
+        return { ok: false, message: "처리 중입니다." }
+      }
       const check = ensureCheck(checksRef.current, slotId)
       if (check.status !== "closed") {
         return { ok: false, message: "참여체크 마감 후 수익 없음으로 마감할 수 있습니다." }
       }
-      const result = await bossApi.updateEvent({ slotId, action: "no_income" })
-      if (result.ok) patchBossSlots(result.patch)
-      return result
+      setMutationPending(key, true)
+      try {
+        const result = await bossApi.updateEvent({ slotId, action: "no_income" })
+        if (result.ok) patchBossSlots(result.patch)
+        return result
+      } finally {
+        setMutationPending(key, false)
+      }
     },
-    [patchBossSlots],
+    [patchBossSlots, pendingMutations, setMutationPending],
   )
 
   const declareSlotIncome = useCallback(
     async (slotId: string): Promise<{ ok: boolean; message: string }> => {
+      const key = `boss-income:${slotId}`
+      if (pendingMutations.has(key)) {
+        return { ok: false, message: "처리 중입니다." }
+      }
       const check = ensureCheck(checksRef.current, slotId)
       if (check.status !== "closed") {
         return { ok: false, message: "참여체크 마감 후 수익 발생을 등록할 수 있습니다." }
@@ -438,35 +590,64 @@ export function ParticipationProvider({
       if (flags.noIncomeClosed) {
         return { ok: false, message: "이미 수익 없음으로 마감된 타임입니다." }
       }
-      const result = await bossApi.updateEvent({ slotId, action: "declare_income" })
-      if (result.ok) patchBossSlots(result.patch)
-      return result
+      setMutationPending(key, true)
+      try {
+        const result = await bossApi.updateEvent({ slotId, action: "declare_income" })
+        if (result.ok) patchBossSlots(result.patch)
+        return result
+      } finally {
+        setMutationPending(key, false)
+      }
     },
-    [slotAdminFlags, patchBossSlots],
+    [slotAdminFlags, patchBossSlots, pendingMutations, setMutationPending],
   )
 
   const cancelNoIncomeSlot = useCallback(
     async (slotId: string): Promise<{ ok: boolean; message: string }> => {
+      const key = `boss-income:${slotId}`
+      if (pendingMutations.has(key)) {
+        return { ok: false, message: "처리 중입니다." }
+      }
       const flags = slotAdminFlags[slotId] ?? DEFAULT_SLOT_ADMIN_FLAGS
       if (!flags.noIncomeClosed) {
         return { ok: false, message: "수익 없음으로 마감된 타임만 취소할 수 있습니다." }
       }
-      const result = await bossApi.updateEvent({ slotId, action: "cancel_no_income" })
-      if (result.ok) patchBossSlots(result.patch)
-      return result
+      setMutationPending(key, true)
+      try {
+        const result = await bossApi.updateEvent({ slotId, action: "cancel_no_income" })
+        if (result.ok) patchBossSlots(result.patch)
+        return result
+      } finally {
+        setMutationPending(key, false)
+      }
     },
-    [slotAdminFlags, patchBossSlots],
+    [slotAdminFlags, patchBossSlots, pendingMutations, setMutationPending],
   )
 
   const submitCode = useCallback(
     async (code: string): Promise<{ ok: boolean; message: string }> => {
-      const result = await bossApi.joinByCode(code)
-      if (result.ok) {
-        patchBossSlots(result.patch)
+      const key = "boss-join-code"
+      if (pendingMutations.has(key)) {
+        return { ok: false, message: "처리 중입니다." }
       }
-      return result
+      const tracker = trackInteraction("boss-participation-join")
+      tracker.markPending()
+      setMutationPending(key, true)
+      try {
+        const result = await bossApi.joinByCode(code)
+        if (result.ok) {
+          patchBossSlots(result.patch)
+        }
+        tracker.finish({ ok: result.ok })
+        return result
+      } catch {
+        tracker.finish({ error: true })
+        return { ok: false, message: "처리 중 오류가 발생했습니다." }
+      } finally {
+        setMutationPending(key, false)
+      }
     },
-    [patchBossSlots],
+    [patchBossSlots, pendingMutations, setMutationPending],
   )
 
   const value = useMemo<ParticipationContextValue>(
@@ -499,6 +680,7 @@ export function ParticipationProvider({
       retryLoad,
       ensureFullBossDataLoaded,
       applyBossPatch: patchBossSlots,
+      isMutationPending,
     }),
     [
       slots,
@@ -529,6 +711,7 @@ export function ParticipationProvider({
       retryLoad,
       ensureFullBossDataLoaded,
       patchBossSlots,
+      isMutationPending,
     ],
   )
 

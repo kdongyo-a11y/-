@@ -43,7 +43,7 @@ function BossDetailContent({
   slotId: string
   onNavigate: (nav: AdminNavState) => void
 }) {
-  const { getCheck, getSlotAdminFlags, closeSlotWithNoIncome, declareSlotIncome, cancelNoIncomeSlot, loadError, retryLoad } =
+  const { getCheck, getSlotAdminFlags, closeSlotWithNoIncome, declareSlotIncome, cancelNoIncomeSlot, loadError, retryLoad, isMutationPending } =
     useParticipation()
   const { getBossSettlement } = useSettlement()
   const status = useBossSlotStatus(slot)
@@ -56,6 +56,7 @@ function BossDetailContent({
     isClosed && !flags.noIncomeClosed && !flags.incomeDeclared && !settlement
   const showSettlement =
     isClosed && !flags.noIncomeClosed && (flags.incomeDeclared || !!settlement)
+  const incomePending = isMutationPending(`boss-income:${slotId}`)
 
   return (
     <div>
@@ -106,27 +107,29 @@ function BossDetailContent({
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
+              disabled={incomePending}
               onClick={() => {
                 void (async () => {
                   const r = await closeSlotWithNoIncome(slotId)
                   alert(r.message)
                 })()
               }}
-              className="rounded-xl border border-border bg-secondary py-3 text-xs font-semibold text-foreground"
+              className="rounded-xl border border-border bg-secondary py-3 text-xs font-semibold text-foreground disabled:cursor-not-allowed disabled:opacity-50"
             >
-              수익 없음으로 마감
+              {incomePending ? "처리 중…" : "수익 없음으로 마감"}
             </button>
             <button
               type="button"
+              disabled={incomePending}
               onClick={() => {
                 void (async () => {
                   const r = await declareSlotIncome(slotId)
                   alert(r.message)
                 })()
               }}
-              className="rounded-xl bg-primary py-3 text-xs font-semibold text-primary-foreground"
+              className="rounded-xl bg-primary py-3 text-xs font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
             >
-              수익 발생
+              {incomePending ? "처리 중…" : "수익 발생"}
             </button>
           </div>
         </div>

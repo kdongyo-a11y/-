@@ -18,6 +18,7 @@ import {
 } from "@/lib/operation-settings-types"
 import { MEMBER_ROLE_LABELS } from "@/lib/member-types"
 import { formatKstDateTimeLabel } from "@/lib/operation-policy-kst-utils"
+import { trackInteraction } from "@/lib/interaction-perf"
 
 type Props = {
   onNavigate: (nav: AdminNavState) => void
@@ -122,7 +123,10 @@ export function AdminOperationSettingsView({ onNavigate }: Props) {
   }
 
   async function handleSave() {
+    if (saving) return
     setSaving(true)
+    const tracker = trackInteraction("operation-policy-save")
+    tracker.markPending()
     const res = await fetch("/api/admin/operation-settings/mutate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -149,6 +153,7 @@ export function AdminOperationSettingsView({ onNavigate }: Props) {
       policyView?: GuildOperationPolicyView
     }
     setSaving(false)
+    tracker.finish({ ok: data.ok })
     alert(data.message)
     if (data.ok) {
       setChangeReason("")

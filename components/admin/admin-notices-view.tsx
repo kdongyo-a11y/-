@@ -8,6 +8,7 @@ import { ADMIN_HOME } from "@/components/admin/admin-types"
 import type { AdminNoticeSummary } from "@/lib/notices-types"
 import { formatKstDateTimeLabel, isoToKstParts } from "@/lib/operation-policy-kst-utils"
 import { useAuth } from "@/components/auth-context"
+import { trackInteraction } from "@/lib/interaction-perf"
 
 type Props = {
   onNavigate: (nav: AdminNavState) => void
@@ -87,7 +88,10 @@ export function AdminNoticesView({ onNavigate }: Props) {
   }
 
   async function handleSave() {
+    if (saving) return
     setSaving(true)
+    const tracker = trackInteraction("notice-save")
+    tracker.markPending()
     const res = await fetch("/api/admin/notices/mutate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -106,6 +110,7 @@ export function AdminNoticesView({ onNavigate }: Props) {
     })
     const data = (await res.json()) as { ok: boolean; message: string; notices?: AdminNoticeSummary[] }
     setSaving(false)
+    tracker.finish({ ok: data.ok })
     alert(data.message)
     if (data.ok) {
       resetForm()

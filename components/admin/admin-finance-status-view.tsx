@@ -23,6 +23,7 @@ import {
   getWorkQueueNavigateAction,
   isInlineWorkQueueMutationEnabled,
 } from "@/lib/finance-work-queue-actions"
+import { trackInteraction } from "@/lib/interaction-perf"
 import {
   FINANCE_WORK_ITEM_KIND_LABELS,
   sortFinanceWorkItems,
@@ -588,6 +589,8 @@ function RevenueReceiptForm({
       return
     }
     setSubmitting(true)
+    const tracker = trackInteraction("revenue-receipt")
+    tracker.markPending()
     const res = await confirmRevenueReceipt({
       sourceType,
       sourceId,
@@ -595,6 +598,7 @@ function RevenueReceiptForm({
       memo,
     })
     setSubmitting(false)
+    tracker.finish({ ok: res.ok })
     alert(res.message)
     if (res.ok) onConfirmed()
   }

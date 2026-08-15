@@ -191,6 +191,7 @@ export async function POST(request: Request) {
     }
 
     const patch = await fetchBossSlotPatch(admin, guildId, body.slotId)
+    patch.patchLevel = "attendee"
     dbCalls += 3
 
     const successCount = results.filter((r) => r.ok).length

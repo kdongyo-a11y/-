@@ -9,6 +9,7 @@ import { DUES_PAYMENT_STATUS_LABELS, type DuesPaymentStatus } from "@/lib/dues-t
 import { financeTabNav } from "@/components/admin/admin-nav-helpers"
 import { formatWon } from "@/lib/guild-data"
 import { cn } from "@/lib/utils"
+import { trackInteraction } from "@/lib/interaction-perf"
 
 type Props = {
   billId: string
@@ -26,6 +27,7 @@ export function AdminDuesDetailView({ billId, onNavigate }: Props) {
     nextStatus: DuesPaymentStatus
   } | null>(null)
   const [memo, setMemo] = useState("")
+  const [submitting, setSubmitting] = useState(false)
 
   if (!bill || !summary) {
     return (
@@ -38,11 +40,21 @@ export function AdminDuesDetailView({ billId, onNavigate }: Props) {
   const items = bill.targetMemberIds.map((id) => bill.items[id]).filter(Boolean)
 
   async function submitStatus() {
-    if (!memoModal || !memo.trim()) return
-    const r = await setPaymentStatus(billId, memoModal.memberId, memoModal.nextStatus, memo.trim())
-    alert(r.message)
-    setMemoModal(null)
-    setMemo("")
+    if (!memoModal || !memo.trim() || submitting) return
+    setSubmitting(true)
+    const tracker = trackInteraction("dues-payment")
+    tracker.markPending()
+    try {
+      const r = await setPaymentStatus(billId, memoModal.memberId, memoModal.nextStatus, memo.trim())
+      tracker.finish({ ok: r.ok })
+      alert(r.message)
+      if (r.ok) {
+        setMemoModal(null)
+        setMemo("")
+      }
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (
@@ -149,11 +161,11 @@ export function AdminDuesDetailView({ billId, onNavigate }: Props) {
               </button>
               <button
                 type="button"
-                disabled={!memo.trim()}
-                onClick={submitStatus}
+                disabled={!memo.trim() || submitting}
+                onClick={() => void submitStatus()}
                 className="flex-1 rounded-xl bg-primary py-2.5 text-sm font-semibold text-primary-foreground disabled:opacity-50"
               >
-                확인
+                {submitting ? "처리 중…" : "확인"}
               </button>
             </div>
           </div>

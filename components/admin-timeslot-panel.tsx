@@ -32,6 +32,7 @@ import {
   type BossTimeSlot,
 } from "@/lib/boss-time-slots"
 import { cn } from "@/lib/utils"
+import { trackInteraction } from "@/lib/interaction-perf"
 
 const MEMO_PRESETS = ["늦게 합류 / 참여 인정", "중간 이탈", "참여체크 누락 확인"] as const
 
@@ -65,11 +66,11 @@ export function AdminTimeslotPanel({ slotId: controlledSlotId, embedded = false 
     loadError,
     retryLoad,
     applyBossPatch,
+    isMutationPending,
   } = useParticipation()
   const { getRosterMembers } = useMembers()
   const { getBossSettlement, reviseSettlement } = useSettlement()
   const rosterForCheck = getRosterMembers()
-  const [starting, setStarting] = useState(false)
 
   const [internalSlotId, setInternalSlotId] = useState<string>(() => {
     const now = new Date().getHours()
@@ -80,6 +81,13 @@ export function AdminTimeslotPanel({ slotId: controlledSlotId, embedded = false 
   })
   const selectedSlotId = controlledSlotId ?? internalSlotId
   const setSelectedSlotId = controlledSlotId ? () => {} : setInternalSlotId
+
+  const starting = isMutationPending(`boss-start:${selectedSlotId}`)
+  const closing = isMutationPending(`boss-close:${selectedSlotId}`)
+  const regenerating = isMutationPending(`boss-regenerate:${selectedSlotId}`)
+  const extraBossSaving = isMutationPending(`boss-extra-boss:${selectedSlotId}`)
+  const manualPending = isMutationPending(`boss-manual:${selectedSlotId}`)
+
   const [search, setSearch] = useState("")
   const [memoModal, setMemoModal] = useState<{
     action: "add" | "remove"
@@ -131,29 +139,26 @@ export function AdminTimeslotPanel({ slotId: controlledSlotId, embedded = false 
 
   async function handleStart() {
     if (starting || !canStartParticipationCheck) return
-    setStarting(true)
-    try {
-      await startCheck(selectedSlotId)
-    } finally {
-      setStarting(false)
-    }
+    await startCheck(selectedSlotId)
   }
 
   function handleClose() {
+    if (closing) return
     const count = check.attendees.length
     const msg = `${selectedSlot.time} 참여체크를 마감하시겠습니까?\n현재 참여인원 ${count}명`
     if (window.confirm(msg)) {
-      closeCheck(selectedSlotId)
+      void closeCheck(selectedSlotId)
     }
   }
 
   function handleRegenerate() {
+    if (regenerating) return
     if (
       window.confirm(
         "참여코드를 재생성하시겠습니까?\n기존 코드는 즉시 무효화되며, 새 코드만 유효합니다.",
       )
     ) {
-      regenerateCode(selectedSlotId)
+      void regenerateCode(selectedSlotId)
     }
   }
 
@@ -174,7 +179,7 @@ export function AdminTimeslotPanel({ slotId: controlledSlotId, embedded = false 
   }
 
   async function submitMemo() {
-    if (!memoModal || !memoText.trim()) return
+    if (!memoModal || !memoText.trim() || manualPending) return
 
     const settlement = getBossSettlement(selectedSlotId)
     const memo = memoText.trim()
@@ -194,7 +199,6 @@ export function AdminTimeslotPanel({ slotId: controlledSlotId, embedded = false 
     }
 
     if (settlement && isClosed) {
-      // boss revision: 서버가 boss_participations DB에서 최신 참여자를 조회함
       const r = await reviseSettlement("boss", selectedSlotId, [], memo)
       if (!r.ok) alert(r.message)
     }
@@ -227,6 +231,8 @@ export function AdminTimeslotPanel({ slotId: controlledSlotId, embedded = false 
     if (selectedMembers.length === 0) return
 
     setBatchAdding(true)
+    const tracker = trackInteraction("boss-manual-batch")
+    tracker.markPending()
     try {
       const result = await bossApi.manualParticipationBatch({
         slotId: selectedSlotId,
@@ -263,6 +269,7 @@ export function AdminTimeslotPanel({ slotId: controlledSlotId, embedded = false 
       }
 
       if (failedMembers.length === 0 && failureMessages.length === 0) {
+        tracker.finish({ ok: true })
         setMultiAddOpen(false)
         setMultiAddSelected(new Set())
         setMultiAddMemo("")
@@ -276,6 +283,7 @@ export function AdminTimeslotPanel({ slotId: controlledSlotId, embedded = false 
           : `${successCount}명 추가 완료`
 
       alert([summary, ...failureMessages].join("\n"))
+      tracker.finish({ ok: successCount > 0 })
 
       if (failedMembers.length > 0) {
         setMultiAddSelected(new Set(failedMembers.map((m) => m.id)))
@@ -352,7 +360,8 @@ export function AdminTimeslotPanel({ slotId: controlledSlotId, embedded = false 
           <MainBossSelector
             selected={check.extraMainBosses}
             onToggle={toggleExtraBoss}
-            disabled={false}
+            disabled={extraBossSaving}
+            saving={extraBossSaving}
           />
         )}
       </Card>
@@ -400,10 +409,11 @@ export function AdminTimeslotPanel({ slotId: controlledSlotId, embedded = false 
               <button
                 type="button"
                 onClick={handleRegenerate}
-                className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-border bg-secondary py-2.5 text-xs font-semibold text-foreground transition-colors hover:bg-accent"
+                disabled={regenerating}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-border bg-secondary py-2.5 text-xs font-semibold text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <RefreshCw className="h-3.5 w-3.5" />
-                코드 재생성
+                <RefreshCw className={cn("h-3.5 w-3.5", regenerating && "animate-spin")} />
+                {regenerating ? "재생성 중…" : "코드 재생성"}
               </button>
             </div>
           </Card>
@@ -439,9 +449,10 @@ export function AdminTimeslotPanel({ slotId: controlledSlotId, embedded = false 
           <button
             type="button"
             onClick={handleClose}
-            className="w-full rounded-xl border border-destructive/40 bg-destructive/10 py-3 text-sm font-semibold text-destructive transition-opacity hover:opacity-90"
+            disabled={closing}
+            className="w-full rounded-xl border border-destructive/40 bg-destructive/10 py-3 text-sm font-semibold text-destructive transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            참여체크 마감
+            {closing ? "마감 중…" : "참여체크 마감"}
           </button>
         </div>
       )}
@@ -684,17 +695,24 @@ function MainBossSelector({
   selected,
   onToggle,
   disabled,
+  saving = false,
 }: {
   selected: string[]
   onToggle: (name: string) => void
   disabled: boolean
+  saving?: boolean
 }) {
   return (
     <div className="mt-3 border-t border-border pt-3">
       <p className="text-xs font-medium text-muted-foreground">
         확정 스폰: {MAIN_FIXED_BOSSES.join(" · ")}
       </p>
-      <p className="mt-2 text-xs font-medium text-foreground">추가 메인보스 (0~9개)</p>
+      <div className="mt-2 flex items-center justify-between gap-2">
+        <p className="text-xs font-medium text-foreground">추가 메인보스 (0~9개)</p>
+        {saving && (
+          <span className="text-[10px] font-medium text-muted-foreground">저장 중…</span>
+        )}
+      </div>
       <div className="mt-2 flex flex-wrap gap-1.5">
         {MAIN_EXTRA_BOSSES.map((name) => {
           const on = selected.includes(name)

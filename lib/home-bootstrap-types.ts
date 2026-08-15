@@ -28,7 +28,9 @@ export type HomeBootstrapPayload = {
   }
 }
 
+/** Partial slot fields allowed — client merges with existing check state. */
 export type BossSlotPatchResponse = {
-  checks: Record<string, SlotCheck>
-  slotAdminFlags: Record<string, SlotAdminFlags>
+  checks: Record<string, Partial<SlotCheck> & { slotId?: string }>
+  slotAdminFlags: Record<string, Partial<SlotAdminFlags>>
+  patchLevel?: "tiny" | "attendee" | "full"
 }

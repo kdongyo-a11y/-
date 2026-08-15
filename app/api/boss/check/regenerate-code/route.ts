@@ -5,8 +5,9 @@ import { requireAuthenticatedMember } from "@/lib/supabase/auth-helpers"
 import { requireManagerOrAdmin } from "@/lib/supabase/operation-auth"
 import { generateBossCheckCode } from "@/lib/supabase/boss-mapper"
 import { getBossEventBySlotId } from "@/lib/supabase/boss-event-helpers"
-import { fetchBossSlotPatch } from "@/lib/supabase/boss-slot-delta"
+import { buildTinyCodePatch } from "@/lib/boss-patch-utils"
 import { actorGuildId } from "@/lib/supabase/guild-scope-helpers"
+import { PerfTimer } from "@/lib/perf-log"
 
 export async function POST(request: Request) {
   try {
@@ -54,14 +55,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, message: "코드 재생성에 실패했습니다." }, { status: 500 })
     }
 
-    const patch = await fetchBossSlotPatch(admin, guildId, body.slotId)
-
-    return NextResponse.json({
+    const patch = buildTinyCodePatch(body.slotId, code)
+    patch.patchLevel = "tiny"
+    const payload = {
       ok: true,
       message: "참여코드를 재생성했습니다.",
       slotId: body.slotId,
       patch,
-    })
+    }
+
+    return NextResponse.json(payload)
   } catch (error) {
     console.error("[boss/check/regenerate-code]", error)
     return NextResponse.json(

@@ -4,9 +4,13 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { requireAuthenticatedMember } from "@/lib/supabase/auth-helpers"
 import { requireManagerOrAdmin } from "@/lib/supabase/operation-auth"
 import { getBossEventBySlotId } from "@/lib/supabase/boss-event-helpers"
-import { fetchBossSlotPatch } from "@/lib/supabase/boss-slot-delta"
+import {
+  buildTinyExtraBossesPatch,
+  buildTinyIncomeFlagsPatch,
+} from "@/lib/boss-patch-utils"
 import { getSettlementByKey } from "@/lib/supabase/settlement-data"
 import { actorGuildId } from "@/lib/supabase/guild-scope-helpers"
+import { PerfTimer } from "@/lib/perf-log"
 
 type Body = {
   slotId?: string
@@ -15,10 +19,12 @@ type Body = {
 }
 
 export async function POST(request: Request) {
+  const perf = new PerfTimer("boss-extra-main-toggle")
   try {
     const supabase = await createClient()
-    const authResult = await requireAuthenticatedMember(supabase)
+    const authResult = await perf.measure("authMs", () => requireAuthenticatedMember(supabase))
     if ("error" in authResult) {
+      perf.finish({ ok: false })
       return NextResponse.json(
         { ok: false, message: authResult.error },
         { status: authResult.status },
@@ -27,6 +33,7 @@ export async function POST(request: Request) {
 
     const roleCheck = requireManagerOrAdmin(authResult.member)
     if (!roleCheck.ok) {
+      perf.finish({ ok: false })
       return NextResponse.json(
         { ok: false, message: roleCheck.message },
         { status: roleCheck.status },
@@ -35,42 +42,63 @@ export async function POST(request: Request) {
 
     const body = (await request.json()) as Body
     if (!body.slotId || !body.action) {
+      perf.finish({ ok: false, reason: "validation" })
       return NextResponse.json({ ok: false, message: "필수 값이 누락되었습니다." }, { status: 400 })
     }
 
     const admin = createAdminClient()
     const guildId = actorGuildId(authResult.member)
-    const event = await getBossEventBySlotId(admin, body.slotId, guildId)
+    const event = await perf.measure("lookupMs", () =>
+      getBossEventBySlotId(admin, body.slotId!, guildId),
+    )
     if (!event) {
+      perf.finish({ ok: false, reason: "not_found" })
       return NextResponse.json({ ok: false, message: "보스타임 이벤트를 찾을 수 없습니다." }, { status: 404 })
     }
 
     if (body.action === "extra_bosses") {
       const bosses = body.extraMainBosses ?? []
-      const { error } = await admin
-        .from("boss_events")
-        .update({ extra_main_bosses: bosses })
-        .eq("id", event.id)
-        .eq("guild_id", guildId)
+      const { error } = await perf.measure("updateMs", async () =>
+        admin
+          .from("boss_events")
+          .update({ extra_main_bosses: bosses })
+          .eq("id", event.id)
+          .eq("guild_id", guildId),
+      )
 
       if (error) {
         console.error("[boss/events/update]", error)
+        perf.finish({ ok: false, reason: "error" })
         return NextResponse.json({ ok: false, message: "저장에 실패했습니다." }, { status: 500 })
       }
 
-      await admin.from("boss_event_spawns").delete().eq("boss_event_id", event.id)
-      if (bosses.length > 0) {
-        await admin.from("boss_event_spawns").insert(
-          bosses.map((boss_name) => ({
-            boss_event_id: event.id,
-            boss_name,
-            spawned: true,
-          })),
-        )
-      }
+      perf.addDbCalls(1)
+      await perf.measure("spawnSyncMs", async () => {
+        await admin.from("boss_event_spawns").delete().eq("boss_event_id", event.id)
+        perf.addDbCalls(1)
+        if (bosses.length > 0) {
+          await admin.from("boss_event_spawns").insert(
+            bosses.map((boss_name) => ({
+              boss_event_id: event.id,
+              boss_name,
+              spawned: true,
+            })),
+          )
+          perf.addDbCalls(1)
+        }
+      })
 
-      const patch = await fetchBossSlotPatch(admin, guildId, body.slotId)
-      return NextResponse.json({ ok: true, message: "저장되었습니다.", slotId: body.slotId, patch })
+      const patch = buildTinyExtraBossesPatch(body.slotId, bosses)
+      patch.patchLevel = "tiny"
+      const payload = {
+        ok: true,
+        message: "저장되었습니다.",
+        slotId: body.slotId,
+        patch,
+      }
+      const bodyStr = JSON.stringify(payload)
+      perf.finish({ ok: true, action: "extra_bosses", patchLevel: "tiny", payloadBytes: bodyStr.length })
+      return NextResponse.json(payload)
     }
 
     if (event.participation_status !== "closed") {
@@ -96,8 +124,14 @@ export async function POST(request: Request) {
         return NextResponse.json({ ok: false, message: "마감에 실패했습니다." }, { status: 500 })
       }
 
-      const patch = await fetchBossSlotPatch(admin, guildId, body.slotId)
-      return NextResponse.json({ ok: true, message: "수익 없음으로 마감되었습니다.", slotId: body.slotId, patch })
+      const patch = buildTinyIncomeFlagsPatch(body.slotId, "no_income")
+      patch.patchLevel = "tiny"
+      return NextResponse.json({
+        ok: true,
+        message: "수익 없음으로 마감되었습니다.",
+        slotId: body.slotId,
+        patch,
+      })
     }
 
     if (body.action === "cancel_no_income") {
@@ -139,8 +173,14 @@ export async function POST(request: Request) {
         at: new Date().toISOString(),
       })
 
-      const patch = await fetchBossSlotPatch(admin, guildId, body.slotId)
-      return NextResponse.json({ ok: true, message: "수익 없음 마감이 취소되었습니다.", slotId: body.slotId, patch })
+      const patch = buildTinyIncomeFlagsPatch(body.slotId, "unprocessed")
+      patch.patchLevel = "tiny"
+      return NextResponse.json({
+        ok: true,
+        message: "수익 없음 마감이 취소되었습니다.",
+        slotId: body.slotId,
+        patch,
+      })
     }
 
     if (event.income_status === "no_income") {
@@ -161,7 +201,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, message: "등록에 실패했습니다." }, { status: 500 })
     }
 
-    const patch = await fetchBossSlotPatch(admin, guildId, body.slotId)
+    const patch = buildTinyIncomeFlagsPatch(body.slotId, "income_declared")
+    patch.patchLevel = "tiny"
     return NextResponse.json({
       ok: true,
       message: "수익 발생으로 등록되었습니다. 수익금을 입력해주세요.",
@@ -170,6 +211,7 @@ export async function POST(request: Request) {
     })
   } catch (error) {
     console.error("[boss/events/update]", error)
+    perf.finish({ ok: false, reason: "error" })
     return NextResponse.json(
       { ok: false, message: "처리 중 오류가 발생했습니다." },
       { status: 500 },
