@@ -21,10 +21,11 @@ import {
   DEFAULT_SLOT_ADMIN_FLAGS,
   type SlotAdminFlags,
 } from "@/lib/boss-admin-status"
-import { bossApi, fetchBossEvents } from "@/lib/operations-api"
+import { bossApi, fetchBossEvents, type BossMutationResult } from "@/lib/operations-api"
 import type { BossSlotPatchResponse } from "@/lib/home-bootstrap-types"
 import { mergeBossSlotPatch } from "@/lib/boss-patch-utils"
 import { trackInteraction } from "@/lib/interaction-perf"
+import { pendingKeys } from "@/lib/pending-keys"
 
 export type AttendeeMethod = "코드" | "수동추가"
 
@@ -33,6 +34,8 @@ export type Attendee = {
   name: string
   checkedAt: number
   method: AttendeeMethod
+  /** Optimistic in-flight state — stripped on server reconcile */
+  pending?: "adding" | "removing"
 }
 
 export type AdminModificationLog = {
@@ -105,6 +108,11 @@ type ParticipationContextValue = {
     member: RosterMember,
     memo: string,
   ) => Promise<{ ok: boolean; message: string }>
+  addAttendeesManualBatch: (
+    slotId: string,
+    members: RosterMember[],
+    memo: string,
+  ) => Promise<BossMutationResult>
   setExtraMainBosses: (slotId: string, bosses: string[]) => void
   getSlotAdminFlags: (slotId: string) => SlotAdminFlags
   closeSlotWithNoIncome: (slotId: string) => Promise<{ ok: boolean; message: string }>
@@ -429,62 +437,173 @@ export function ParticipationProvider({
     [patchBossSlots, pendingMutations, setMutationPending],
   )
 
-  const addAttendeeManual = useCallback(
-    async (slotId: string, member: RosterMember, memo: string) => {
-      const key = `boss-manual:${slotId}`
-      if (pendingMutations.has(key)) {
-        return { ok: false, message: "처리 중입니다." }
+  const mutateBossAttendeesManual = useCallback(
+    async (
+      slotId: string,
+      ops: Array<{ member: RosterMember; action: "add" | "remove" }>,
+      memo: string,
+      interactionKind: "boss-manual-add" | "boss-manual-remove" | "boss-manual-batch",
+    ): Promise<BossMutationResult> => {
+      if (ops.length === 0) {
+        return { ok: false, message: "처리할 혈원이 없습니다." }
       }
-      const tracker = trackInteraction("boss-manual-add")
+
+      for (const op of ops) {
+        const key =
+          op.action === "add"
+            ? pendingKeys.bossManualAdd(slotId, op.member.id)
+            : pendingKeys.bossManualRemove(slotId, op.member.id)
+        if (pendingMutations.has(key)) {
+          return { ok: false, message: "처리 중입니다." }
+        }
+      }
+
+      const snapshot = [...(checksRef.current[slotId]?.attendees ?? [])]
+      const tracker = trackInteraction(interactionKind)
       tracker.markPending()
-      setMutationPending(key, true)
+
+      for (const op of ops) {
+        const key =
+          op.action === "add"
+            ? pendingKeys.bossManualAdd(slotId, op.member.id)
+            : pendingKeys.bossManualRemove(slotId, op.member.id)
+        setMutationPending(key, true)
+      }
+
+      setChecks((prev) => {
+        let attendees = [...ensureCheck(prev, slotId).attendees]
+        for (const op of ops) {
+          if (op.action === "add") {
+            attendees = attendees.filter((a) => a.memberId !== op.member.id)
+            attendees.push({
+              memberId: op.member.id,
+              name: op.member.nickname,
+              checkedAt: Date.now(),
+              method: "수동추가" as const,
+              pending: "adding" as const,
+            })
+          } else {
+            attendees = attendees.filter((a) => a.memberId !== op.member.id)
+          }
+        }
+        return {
+          ...prev,
+          [slotId]: { ...ensureCheck(prev, slotId), attendees },
+        }
+      })
+
       try {
-        const result = await bossApi.manualParticipation({
+        const result = await bossApi.manualParticipationBatch({
           slotId,
-          memberId: member.id,
           memo,
-          action: "add",
+          batch: ops.map((op) => ({
+            memberId: op.member.id,
+            action: op.action,
+            memo,
+          })),
         })
-        if (result.ok) patchBossSlots(result.patch)
+
+        const failedIds = new Set(
+          (result.results ?? []).filter((r) => !r.ok).map((r) => r.memberId),
+        )
+
+        if (result.ok) {
+          patchBossSlots(result.patch)
+        } else if (failedIds.size > 0) {
+          setChecks((prev) => {
+            const cur = ensureCheck(prev, slotId)
+            const kept = cur.attendees.filter(
+              (a) => !a.pending || !failedIds.has(a.memberId),
+            )
+            const restoredFromSnapshot = snapshot.filter((a) => failedIds.has(a.memberId))
+            const mergedIds = new Set(kept.map((a) => a.memberId))
+            const restored = restoredFromSnapshot.filter((a) => !mergedIds.has(a.memberId))
+            return {
+              ...prev,
+              [slotId]: { ...cur, attendees: [...kept, ...restored] },
+            }
+          })
+          if (result.patch) patchBossSlots(result.patch)
+        } else {
+          setChecks((prev) => ({
+            ...prev,
+            [slotId]: { ...ensureCheck(prev, slotId), attendees: snapshot },
+          }))
+        }
+
         tracker.finish({ ok: result.ok })
         return result
       } catch {
+        setChecks((prev) => ({
+          ...prev,
+          [slotId]: { ...ensureCheck(prev, slotId), attendees: snapshot },
+        }))
         tracker.finish({ error: true })
         return { ok: false, message: "처리 중 오류가 발생했습니다." }
       } finally {
-        setMutationPending(key, false)
+        for (const op of ops) {
+          const key =
+            op.action === "add"
+              ? pendingKeys.bossManualAdd(slotId, op.member.id)
+              : pendingKeys.bossManualRemove(slotId, op.member.id)
+          setMutationPending(key, false)
+        }
       }
     },
     [patchBossSlots, pendingMutations, setMutationPending],
   )
 
-  const removeAttendeeManual = useCallback(
+  const addAttendeeManual = useCallback(
     async (slotId: string, member: RosterMember, memo: string) => {
-      const key = `boss-manual:${slotId}`
-      if (pendingMutations.has(key)) {
-        return { ok: false, message: "처리 중입니다." }
-      }
-      const tracker = trackInteraction("boss-manual-remove")
-      tracker.markPending()
-      setMutationPending(key, true)
-      try {
-        const result = await bossApi.manualParticipation({
-          slotId,
-          memberId: member.id,
-          memo,
-          action: "remove",
-        })
-        if (result.ok) patchBossSlots(result.patch)
-        tracker.finish({ ok: result.ok })
-        return result
-      } catch {
-        tracker.finish({ error: true })
-        return { ok: false, message: "처리 중 오류가 발생했습니다." }
-      } finally {
-        setMutationPending(key, false)
+      const result = await mutateBossAttendeesManual(
+        slotId,
+        [{ member, action: "add" }],
+        memo,
+        "boss-manual-add",
+      )
+      const item = result.results?.find((r) => r.memberId === member.id)
+      return {
+        ok: item?.ok ?? result.ok,
+        message: item?.message ?? result.message ?? "처리 중 오류가 발생했습니다.",
       }
     },
-    [patchBossSlots, pendingMutations, setMutationPending],
+    [mutateBossAttendeesManual],
+  )
+
+  const removeAttendeeManual = useCallback(
+    async (slotId: string, member: RosterMember, memo: string) => {
+      const result = await mutateBossAttendeesManual(
+        slotId,
+        [{ member, action: "remove" }],
+        memo,
+        "boss-manual-remove",
+      )
+      const item = result.results?.find((r) => r.memberId === member.id)
+      return {
+        ok: item?.ok ?? result.ok,
+        message: item?.message ?? result.message ?? "처리 중 오류가 발생했습니다.",
+      }
+    },
+    [mutateBossAttendeesManual],
+  )
+
+  const addAttendeesManualBatch = useCallback(
+    async (
+      slotId: string,
+      members: RosterMember[],
+      memo: string,
+    ): Promise<BossMutationResult> => {
+      if (members.length === 0) {
+        return { ok: false, message: "추가할 혈원을 선택해주세요." }
+      }
+      return mutateBossAttendeesManual(
+        slotId,
+        members.map((member) => ({ member, action: "add" as const })),
+        memo,
+        members.length === 1 ? "boss-manual-add" : "boss-manual-batch",
+      )
+    },
+    [mutateBossAttendeesManual],
   )
 
   const setExtraMainBosses = useCallback(
@@ -668,6 +787,7 @@ export function ParticipationProvider({
       regenerateCode,
       addAttendeeManual,
       removeAttendeeManual,
+      addAttendeesManualBatch,
       setExtraMainBosses,
       getSlotAdminFlags,
       closeSlotWithNoIncome,
@@ -699,6 +819,7 @@ export function ParticipationProvider({
       regenerateCode,
       addAttendeeManual,
       removeAttendeeManual,
+      addAttendeesManualBatch,
       setExtraMainBosses,
       getSlotAdminFlags,
       closeSlotWithNoIncome,

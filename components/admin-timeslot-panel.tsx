@@ -22,7 +22,6 @@ import {
 import { useMembers } from "@/components/members-context"
 import { useSettlement } from "@/components/settlement-context"
 import { type RosterMember } from "@/lib/member-types"
-import { bossApi } from "@/lib/operations-api"
 import {
   MAIN_EXTRA_BOSSES,
   MAIN_FIXED_BOSSES,
@@ -32,7 +31,7 @@ import {
   type BossTimeSlot,
 } from "@/lib/boss-time-slots"
 import { cn } from "@/lib/utils"
-import { trackInteraction } from "@/lib/interaction-perf"
+import { pendingKeys } from "@/lib/pending-keys"
 
 const MEMO_PRESETS = ["늦게 합류 / 참여 인정", "중간 이탈", "참여체크 누락 확인"] as const
 
@@ -59,14 +58,13 @@ export function AdminTimeslotPanel({ slotId: controlledSlotId, embedded = false 
     startCheck,
     closeCheck,
     regenerateCode,
-    addAttendeeManual,
     removeAttendeeManual,
     setExtraMainBosses,
     openSlotId,
     loadError,
     retryLoad,
-    applyBossPatch,
     isMutationPending,
+    addAttendeesManualBatch,
   } = useParticipation()
   const { getRosterMembers } = useMembers()
   const { getBossSettlement, reviseSettlement } = useSettlement()
@@ -82,11 +80,10 @@ export function AdminTimeslotPanel({ slotId: controlledSlotId, embedded = false 
   const selectedSlotId = controlledSlotId ?? internalSlotId
   const setSelectedSlotId = controlledSlotId ? () => {} : setInternalSlotId
 
-  const starting = isMutationPending(`boss-start:${selectedSlotId}`)
-  const closing = isMutationPending(`boss-close:${selectedSlotId}`)
-  const regenerating = isMutationPending(`boss-regenerate:${selectedSlotId}`)
-  const extraBossSaving = isMutationPending(`boss-extra-boss:${selectedSlotId}`)
-  const manualPending = isMutationPending(`boss-manual:${selectedSlotId}`)
+  const starting = isMutationPending(pendingKeys.bossStart(selectedSlotId))
+  const closing = isMutationPending(pendingKeys.bossClose(selectedSlotId))
+  const regenerating = isMutationPending(pendingKeys.bossRegenerate(selectedSlotId))
+  const extraBossSaving = isMutationPending(pendingKeys.bossExtraBoss(selectedSlotId))
 
   const [search, setSearch] = useState("")
   const [memoModal, setMemoModal] = useState<{
@@ -101,6 +98,7 @@ export function AdminTimeslotPanel({ slotId: controlledSlotId, embedded = false 
   const [multiAddSelected, setMultiAddSelected] = useState<Set<string>>(() => new Set())
   const [multiAddMemo, setMultiAddMemo] = useState("")
   const [batchAdding, setBatchAdding] = useState(false)
+  const [memoSubmitting, setMemoSubmitting] = useState(false)
 
   const selectedSlot = resolveSlot(slots, selectedSlotId) ?? slots[0]!
   const check = getCheck(selectedSlotId)
@@ -133,9 +131,12 @@ export function AdminTimeslotPanel({ slotId: controlledSlotId, embedded = false 
 
   const multiAddCandidates = useMemo(() => {
     const q = multiAddSearch.trim().toLowerCase()
-    if (!q) return allNonAttendees
-    return allNonAttendees.filter((m) => m.nickname.toLowerCase().includes(q))
-  }, [allNonAttendees, multiAddSearch])
+    const available = allNonAttendees.filter(
+      (m) => !isMutationPending(pendingKeys.bossManualAdd(selectedSlotId, m.id)),
+    )
+    if (!q) return available
+    return available.filter((m) => m.nickname.toLowerCase().includes(q))
+  }, [allNonAttendees, multiAddSearch, isMutationPending, selectedSlotId])
 
   async function handleStart() {
     if (starting || !canStartParticipationCheck) return
@@ -179,32 +180,41 @@ export function AdminTimeslotPanel({ slotId: controlledSlotId, embedded = false 
   }
 
   async function submitMemo() {
-    if (!memoModal || !memoText.trim() || manualPending) return
+    if (!memoModal || !memoText.trim() || memoSubmitting) return
 
     const settlement = getBossSettlement(selectedSlotId)
     const memo = memoText.trim()
-
-    if (memoModal.action === "add") {
-      const manualResult = await addAttendeeManual(selectedSlotId, memoModal.member, memo)
-      if (!manualResult.ok) {
-        alert(manualResult.message)
-        return
-      }
-    } else {
-      const manualResult = await removeAttendeeManual(selectedSlotId, memoModal.member, memo)
-      if (!manualResult.ok) {
-        alert(manualResult.message)
-        return
-      }
-    }
-
-    if (settlement && isClosed) {
-      const r = await reviseSettlement("boss", selectedSlotId, [], memo)
-      if (!r.ok) alert(r.message)
-    }
+    const modal = memoModal
 
     setMemoModal(null)
     setMemoText("")
+    setMemoSubmitting(true)
+
+    try {
+      if (modal.action === "add") {
+        const manualResult = await addAttendeesManualBatch(selectedSlotId, [modal.member], memo)
+        const itemResult = manualResult.results?.find((r) => r.memberId === modal.member.id)
+        const ok = itemResult?.ok ?? manualResult.ok
+        if (!ok) {
+          alert(itemResult?.message ?? manualResult.message)
+          return
+        }
+      } else {
+        const manualResult = await removeAttendeeManual(selectedSlotId, modal.member, memo)
+        if (!manualResult.ok) {
+          alert(manualResult.message)
+          return
+        }
+      }
+
+      if (settlement && isClosed) {
+        void reviseSettlement("boss", selectedSlotId, [], memo).then((r) => {
+          if (!r.ok) alert(r.message)
+        })
+      }
+    } finally {
+      setMemoSubmitting(false)
+    }
   }
 
   function openMultiAdd() {
@@ -225,28 +235,19 @@ export function AdminTimeslotPanel({ slotId: controlledSlotId, embedded = false 
 
   async function submitBatchAdd() {
     const memo = multiAddMemo.trim()
-    if (!memo) return
+    if (!memo || batchAdding) return
 
     const selectedMembers = allNonAttendees.filter((m) => multiAddSelected.has(m.id))
     if (selectedMembers.length === 0) return
 
+    setMultiAddOpen(false)
+    setMultiAddSelected(new Set())
+    setMultiAddMemo("")
+    setMultiAddSearch("")
     setBatchAdding(true)
-    const tracker = trackInteraction("boss-manual-batch")
-    tracker.markPending()
-    try {
-      const result = await bossApi.manualParticipationBatch({
-        slotId: selectedSlotId,
-        memo,
-        batch: selectedMembers.map((member) => ({
-          memberId: member.id,
-          action: "add" as const,
-          memo,
-        })),
-      })
 
-      if (result.ok) {
-        applyBossPatch(result.patch)
-      }
+    try {
+      const result = await addAttendeesManualBatch(selectedSlotId, selectedMembers, memo)
 
       const successCount = result.results?.filter((r) => r.ok).length ?? 0
       const failedMembers = selectedMembers.filter(
@@ -269,11 +270,6 @@ export function AdminTimeslotPanel({ slotId: controlledSlotId, embedded = false 
       }
 
       if (failedMembers.length === 0 && failureMessages.length === 0) {
-        tracker.finish({ ok: true })
-        setMultiAddOpen(false)
-        setMultiAddSelected(new Set())
-        setMultiAddMemo("")
-        setMultiAddSearch("")
         return
       }
 
@@ -283,15 +279,10 @@ export function AdminTimeslotPanel({ slotId: controlledSlotId, embedded = false 
           : `${successCount}명 추가 완료`
 
       alert([summary, ...failureMessages].join("\n"))
-      tracker.finish({ ok: successCount > 0 })
 
       if (failedMembers.length > 0) {
+        setMultiAddOpen(true)
         setMultiAddSelected(new Set(failedMembers.map((m) => m.id)))
-      } else {
-        setMultiAddOpen(false)
-        setMultiAddSelected(new Set())
-        setMultiAddMemo("")
-        setMultiAddSearch("")
       }
     } finally {
       setBatchAdding(false)
@@ -444,6 +435,8 @@ export function AdminTimeslotPanel({ slotId: controlledSlotId, embedded = false 
               setMemoModal({ action: "remove", member: m })
               setMemoText("")
             }}
+            slotId={selectedSlotId}
+            isMemberPending={isMutationPending}
           />
 
           <button
@@ -491,6 +484,8 @@ export function AdminTimeslotPanel({ slotId: controlledSlotId, embedded = false 
               setMemoModal({ action: "remove", member: m })
               setMemoText("")
             }}
+            slotId={selectedSlotId}
+            isMemberPending={isMutationPending}
           />
 
           {check.adminLogs.length > 0 && (
@@ -656,11 +651,11 @@ export function AdminTimeslotPanel({ slotId: controlledSlotId, embedded = false 
               </button>
               <button
                 type="button"
-                onClick={submitMemo}
-                disabled={!memoText.trim()}
+                onClick={() => void submitMemo()}
+                disabled={!memoText.trim() || memoSubmitting}
                 className="flex-1 rounded-xl bg-primary py-2.5 text-sm font-semibold text-primary-foreground disabled:opacity-50"
               >
-                확인
+                {memoSubmitting ? "처리 중…" : "확인"}
               </button>
             </div>
           </div>
@@ -753,6 +748,8 @@ function AttendeeSection({
   onOpenMultiAdd,
   onAdd,
   onRemove,
+  slotId,
+  isMemberPending,
 }: {
   search: string
   onSearchChange: (v: string) => void
@@ -768,6 +765,8 @@ function AttendeeSection({
   onOpenMultiAdd: () => void
   onAdd: (m: RosterMember) => void
   onRemove: (m: RosterMember) => void
+  slotId: string
+  isMemberPending: (key: string) => boolean
 }) {
   return (
     <div className="flex flex-col gap-2">
@@ -795,28 +794,45 @@ function AttendeeSection({
               {attendeeCount === 0 ? "참여자가 없습니다." : "검색 결과가 없습니다."}
             </p>
           ) : (
-            attendees.map((a) => (
-              <Card key={a.memberId} className="flex items-center gap-3 py-2.5">
-                <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
+            attendees.map((a) => {
+              const adding = a.pending === "adding"
+              const removing = isMemberPending(pendingKeys.bossManualRemove(slotId, a.memberId))
+              return (
+              <Card
+                key={a.memberId}
+                className={cn(
+                  "flex items-center gap-3 py-2.5",
+                  adding && "border-primary/30 bg-primary/5",
+                )}
+              >
+                <CheckCircle2
+                  className={cn(
+                    "h-4 w-4 shrink-0",
+                    adding ? "text-primary" : "text-success",
+                  )}
+                />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium text-foreground">{a.name}</p>
                   <p className="text-[11px] text-muted-foreground">
-                    체크 {formatCheckTime(a.checkedAt)} · {a.method}
+                    {adding
+                      ? "추가 중…"
+                      : `체크 ${formatCheckTime(a.checkedAt)} · ${a.method}`}
                   </p>
                 </div>
                 <button
                   type="button"
+                  disabled={adding || removing}
                   onClick={() => {
                     const member = roster.find((m) => m.id === a.memberId)
                     if (member) onRemove(member)
                   }}
-                  className="flex shrink-0 items-center gap-1 rounded-lg bg-destructive/10 px-2 py-1.5 text-[11px] font-semibold text-destructive"
+                  className="flex shrink-0 items-center gap-1 rounded-lg bg-destructive/10 px-2 py-1.5 text-[11px] font-semibold text-destructive disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <UserMinus className="h-3 w-3" />
-                  제외
+                  {removing ? "제외 중…" : "제외"}
                 </button>
               </Card>
-            ))
+            )})
           )}
         </ScrollableMemberList>
       )}
@@ -834,21 +850,27 @@ function AttendeeSection({
               {nonAttendeeCount === 0 ? "미참여 혈원이 없습니다." : "검색 결과가 없습니다."}
             </p>
           ) : (
-            nonAttendees.map((m) => (
-              <Card key={m.id} className="flex items-center gap-3 py-2.5">
+            nonAttendees.map((m) => {
+              const adding = isMemberPending(pendingKeys.bossManualAdd(slotId, m.id))
+              return (
+              <Card key={m.id} className={cn("flex items-center gap-3 py-2.5", adding && "opacity-60")}>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium text-foreground">{m.nickname}</p>
+                  {adding && (
+                    <p className="text-[11px] text-muted-foreground">추가 중…</p>
+                  )}
                 </div>
                 <button
                   type="button"
+                  disabled={adding}
                   onClick={() => onAdd(m)}
-                  className="flex shrink-0 items-center gap-1 rounded-lg bg-success/10 px-2 py-1.5 text-[11px] font-semibold text-success"
+                  className="flex shrink-0 items-center gap-1 rounded-lg bg-success/10 px-2 py-1.5 text-[11px] font-semibold text-success disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <UserPlus className="h-3 w-3" />
-                  추가
+                  {adding ? "추가 중…" : "추가"}
                 </button>
               </Card>
-            ))
+            )})
           )}
         </ScrollableMemberList>
       )}
